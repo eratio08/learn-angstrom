@@ -1,0 +1,10 @@
+(executables
+ (public_names learn_angstrom monkey)
+ (names learn_angstrom monkey)
+ (libraries angstrom))
+
+(env
+ (dev
+  (flags
+   (:standard -warn-error -A))))
+
