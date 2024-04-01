@@ -44,7 +44,9 @@
    char ::= 'a' .. 'z' | ''
    array-literal ::= '[' expression-list ']'
    expression-list ::= expression | expression ',' expression-list
-   hash-literal ::= '{' expression-list ']'
+   hash-literal ::= '{' pairs '}'
+   pairs ::= pair | pair ',' pairs
+   pair ::= expression ':' expression
    call-expression ::= identifier '(' expression-list ')'
    index-expression ::= '[' expression ']'
    return-statement ::= 'return' expression ';'
@@ -64,6 +66,11 @@ let is_letter = function
   | _ -> false
 ;;
 
+let is_allowed_signs = function
+  | '_' -> true
+  | _ -> false
+;;
+
 let is_digit = function
   | '0' .. '9' -> true
   | _ -> false
@@ -75,7 +82,11 @@ let ws = skip_while is_ws
 let token t = t >>= fun a -> ws >>= fun _ -> return a
 let char_sym c = token (char c)
 let symbol s = token (string s)
-let identifier = take_while1 (fun c -> (Char.equal ';' c || is_ws c) |> not) <* ws
+
+let identifier =
+  take_while1 (fun c -> is_letter c || is_digit c || is_allowed_signs c) <* ws
+;;
+
 (* let quoted p = char '"' *> p <* char '"' *)
 
 (* tokens *)
@@ -133,6 +144,28 @@ let rec stmt () =
       >>= fun condition ->
       block_stmt >>= fun stmts -> return (`If (condition, stmts)) >>? "if_exp"
     in
+    let fn_params =
+      peek_char_fail >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token >>? "fn_paramas"
+    in
+    let fn_literal =
+      symbol "fn" *> ident
+      >>= fun ident ->
+      char_sym '('
+      >>= (fun _ -> fn_params)
+      <* char_sym ')'
+      >>= fun params ->
+      block_stmt >>= fun stmts -> return (`Fn (ident, params, stmts)) >>? "fn_literal"
+    in
+    let string_literal =
+      char_sym '"' *> take_till (fun c -> Char.equal '"' c)
+      >>= fun str -> return (`String str) <* char_sym '"'
+    in
+    let exp_list = peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token in
+    let array_literal =
+      char_sym '['
+      >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (`Array exps)
+    in
+    let hash_literal = char_sym '{' in
     let prefix_exp () =
       digits
       <|> boolean
@@ -140,6 +173,9 @@ let rec stmt () =
       <|> bang_exp
       <|> grouping_exp
       <|> if_exp
+      <|> fn_literal
+      <|> string_literal
+      <|> array_literal
       <|> ident
       >>? "prefix_exp"
     in
@@ -201,7 +237,10 @@ let rec pp fmt = function
   | `Group exp -> Format.fprintf fmt "(%a)" pp exp (* | ` *)
   | `If (cond, stmts) ->
     Format.fprintf fmt "if(%a) { %a }" pp cond (pp_list ~sep:"" pp) stmts
-  | `ExpStmt exp -> Format.fprintf fmt "%a;" pp exp
+  | `ExpStmt exp -> Format.fprintf fmt "`%a;`" pp exp
+  | `Fn (ident, params, stmts) ->
+    Format.fprintf fmt "fn %a(%a) { %a }" pp ident (pp_list pp) params (pp_list pp) stmts
+  | `Array exps -> Format.fprintf fmt "[%a]" (pp_list pp) exps
   | _ -> Format.printf "Unmatched"
 ;;
 
@@ -211,6 +250,8 @@ let () =
      let some_other = (!true);\n\
      if(true){ true; false;};\n\
      let x = some_name;\n\
-     fn some_func(a, b) { true };"
+     fn some_func(a, b) { true; };\n\
+     let y = \"some string \";\n\
+     let arr = [1,2,3,\"2\"];"
   |> fun ast -> Format.printf "Eval: %a@." pp ast
 ;;
