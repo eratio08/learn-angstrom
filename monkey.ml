@@ -165,7 +165,19 @@ let rec stmt () =
       char_sym '['
       >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (`Array exps)
     in
-    let hash_literal = char_sym '{' in
+    let pair =
+      peek_char_fail
+      >>= fun _ ->
+      exp ()
+      >>= fun key ->
+      char_sym ':'
+      >>= fun _ -> exp () >>= fun value -> return (`Pair (key, value)) |> token
+    in
+    let pairs = sep_by (char_sym ',') pair in
+    let hash_literal =
+      char_sym '{'
+      >>= fun _ -> pairs <* char_sym '}' >>= fun pairs -> return (`Hash pairs)
+    in
     let prefix_exp () =
       digits
       <|> boolean
@@ -176,6 +188,7 @@ let rec stmt () =
       <|> fn_literal
       <|> string_literal
       <|> array_literal
+      <|> hash_literal
       <|> ident
       >>? "prefix_exp"
     in
@@ -234,13 +247,15 @@ let rec pp fmt = function
   | `Minus exp -> Format.fprintf fmt "-%a" pp exp
   | `Stmts ls -> Format.fprintf fmt "%a" (pp_list pp) ls
   | `Error msg -> Format.fprintf fmt "Error %s" msg
-  | `Group exp -> Format.fprintf fmt "(%a)" pp exp (* | ` *)
+  | `Group exp -> Format.fprintf fmt "( %a )" pp exp (* | ` *)
   | `If (cond, stmts) ->
     Format.fprintf fmt "if(%a) { %a }" pp cond (pp_list ~sep:"" pp) stmts
   | `ExpStmt exp -> Format.fprintf fmt "`%a;`" pp exp
   | `Fn (ident, params, stmts) ->
     Format.fprintf fmt "fn %a(%a) { %a }" pp ident (pp_list pp) params (pp_list pp) stmts
-  | `Array exps -> Format.fprintf fmt "[%a]" (pp_list pp) exps
+  | `Array exps -> Format.fprintf fmt "[ %a ]" (pp_list pp) exps
+  | `Hash pairs -> Format.fprintf fmt "{ %a }" (pp_list ~sep:"," pp) pairs
+  | `Pair (key, value) -> Format.fprintf fmt "%a: %a" pp key pp value
   | _ -> Format.printf "Unmatched"
 ;;
 
@@ -252,6 +267,9 @@ let () =
      let x = some_name;\n\
      fn some_func(a, b) { true; };\n\
      let y = \"some string \";\n\
-     let arr = [1,2,3,\"2\"];"
+     let arr = [1,2,3,\"2\"];\n\
+     let arr_empty = [];\n\
+     let hash = { first : 1, second : \"abc\" };\n\
+     let hash_empty = { };\n"
   |> fun ast -> Format.printf "Eval: %a@." pp ast
 ;;
