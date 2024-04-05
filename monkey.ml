@@ -87,7 +87,11 @@ let identifier =
   take_while1 (fun c -> is_letter c || is_digit c || is_allowed_signs c) <* ws
 ;;
 
-(* let quoted p = char '"' *> p <* char '"' *)
+(* Repeated application of parser [p] separated by left associative operation op. *)
+(* let chain_l_1 p op = *)
+(*   let rec rest a = op >>= (fun f -> p >>= fun b -> rest (f a b)) <|> return a in *)
+(*   p >>= fun a -> rest a *)
+(* ;; *)
 
 (* tokens *)
 let semicolon = token (char ';')
@@ -118,12 +122,14 @@ let rec stmt () =
     |> token
     >>? "digits"
   in
+  (* Expression *)
   let rec exp () =
+    (* Prefix Expressions *)
     let bang_exp =
       char_sym '!' >>= (fun _ -> exp ()) >>= fun v -> return (`Bang v) >>? "bank_exp"
     in
-    let minus_exp =
-      char_sym '-' >>= (fun _ -> exp ()) >>= fun v -> return (`Minus v) >>? "minus_exp"
+    let neg_exp =
+      char_sym '-' >>= (fun _ -> exp ()) >>= fun v -> return (`Neg v) >>? "minus_exp"
     in
     let boolean =
       symbol "true"
@@ -160,10 +166,13 @@ let rec stmt () =
       char_sym '"' *> take_till (fun c -> Char.equal '"' c)
       >>= fun str -> return (`String str) <* char_sym '"'
     in
-    let exp_list = peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token in
+    let exp_list =
+      peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token >>? "exp_list"
+    in
     let array_literal =
       char_sym '['
-      >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (`Array exps)
+      >>= fun _ ->
+      exp_list <* char_sym ']' >>= fun exps -> return (`Array exps) >>? "array_literal"
     in
     let pair =
       peek_char_fail
@@ -171,17 +180,18 @@ let rec stmt () =
       exp ()
       >>= fun key ->
       char_sym ':'
-      >>= fun _ -> exp () >>= fun value -> return (`Pair (key, value)) |> token
+      >>= fun _ -> exp () >>= fun value -> return (`Pair (key, value)) |> token >>? "pair"
     in
-    let pairs = sep_by (char_sym ',') pair in
+    let pairs = sep_by (char_sym ',') pair >>? "pairs" in
     let hash_literal =
       char_sym '{'
-      >>= fun _ -> pairs <* char_sym '}' >>= fun pairs -> return (`Hash pairs)
+      >>= fun _ ->
+      pairs <* char_sym '}' >>= fun pairs -> return (`Hash pairs) >>? "hash_literal"
     in
-    let prefix_exp () =
+    let prefix_exp =
       digits
       <|> boolean
-      <|> minus_exp
+      <|> neg_exp
       <|> bang_exp
       <|> grouping_exp
       <|> if_exp
@@ -192,12 +202,52 @@ let rec stmt () =
       <|> ident
       >>? "prefix_exp"
     in
-    (* let infix_exp () = *)
-    (*   debug_str "Infix"; *)
-    (*   return `Todo *)
-    (* in *)
-    prefix_exp () (* <|> infix_exp () *) >>? "exp"
+    (* Infix Expressions *)
+    let addition left =
+      char_sym '+' *> exp () >>= fun right -> return (`Add (left, right))
+    in
+    let substract left =
+      char_sym '-' *> exp () >>= fun right -> return (`Sub (left, right))
+    in
+    let multiplication left =
+      char_sym '*' *> exp () >>= fun right -> return (`Mult (left, right))
+    in
+    let division left =
+      char_sym '/' *> exp () >>= fun right -> return (`Div (left, right))
+    in
+    let eq left = symbol "==" *> exp () >>= fun right -> return (`Eq (left, right)) in
+    let neq left = symbol "!=" *> exp () >>= fun right -> return (`Neq (left, right)) in
+    let lt left = char_sym '<' *> exp () >>= fun right -> return (`Lt (left, right)) in
+    let gt left = char_sym '>' *> exp () >>= fun right -> return (`Gt (left, right)) in
+    let call ident =
+      char_sym '(' *> sep_by (char_sym ',') (exp ())
+      <* char_sym ')'
+      >>= fun args -> return (`Call (ident, args))
+    in
+    let index ident =
+      char_sym '[' *> exp () <* char_sym ']' >>= fun idx -> return (`Index (ident, idx))
+    in
+    (* *)
+    prefix_exp
+    >>= fun left ->
+    ws
+    *> (peek_char
+        >>= function
+        | Some '+' -> addition left
+        | Some '-' -> substract left
+        | Some '*' -> multiplication left
+        | Some '/' -> division left
+        | Some '=' -> eq left
+        | Some '!' -> neq left
+        | Some '<' -> lt left
+        | Some '>' -> gt left
+        | Some '(' -> call left
+        | Some '[' -> index left
+        | Some ';' | Some ')' | Some ',' | Some ']' | Some '}' | Some ':' -> return left
+        | _ -> fail "" >>? "infix fail")
+    >>? "exp"
   in
+  (* Statements *)
   let let_stmt =
     symbol "let"
     *> (ident
@@ -217,7 +267,7 @@ let rec stmt () =
     <* char_sym ';'
     >>= fun exp -> return (`ExpStmt exp) >>? "exp_stmt"
   in
-  let_stmt <|> return_stmt <|> exp_stmt
+  let_stmt <|> return_stmt <|> exp_stmt >>? "Stmt done\n"
 ;;
 
 let stmts = many (stmt ()) >>= fun ls -> return (`Stmts ls)
@@ -231,10 +281,10 @@ let eval str =
   | Error msg -> `Error msg
 ;;
 
-let rec pp_list ?(sep = ";") fmt_a fmt = function
+let rec pp_list ?(sep = "; ") fmt_a fmt = function
   | [] -> Format.fprintf fmt ""
   | x :: [] -> Format.fprintf fmt "%a" fmt_a x
-  | x :: xs -> Format.fprintf fmt "%a%s %a" fmt_a x sep (pp_list fmt_a) xs
+  | x :: xs -> Format.fprintf fmt "%a%s%a" fmt_a x sep (pp_list ~sep fmt_a) xs
 ;;
 
 let rec pp fmt = function
@@ -244,18 +294,37 @@ let rec pp fmt = function
   | `Bang exp -> Format.fprintf fmt "!%a" pp exp
   | `Bool b -> Format.fprintf fmt "%b" b
   | `Identifier ident -> Format.fprintf fmt "%s" ident
-  | `Minus exp -> Format.fprintf fmt "-%a" pp exp
-  | `Stmts ls -> Format.fprintf fmt "%a" (pp_list pp) ls
+  | `Neg exp -> Format.fprintf fmt "-%a" pp exp
+  | `Stmts ls -> Format.fprintf fmt "%a" (pp_list ~sep:"\n " pp) ls
   | `Error msg -> Format.fprintf fmt "Error %s" msg
-  | `Group exp -> Format.fprintf fmt "( %a )" pp exp (* | ` *)
+  | `Group exp -> Format.fprintf fmt "( %a )" pp exp
   | `If (cond, stmts) ->
-    Format.fprintf fmt "if(%a) { %a }" pp cond (pp_list ~sep:"" pp) stmts
+    Format.fprintf fmt "if( %a ) { %a }" pp cond (pp_list ~sep:"" pp) stmts
   | `ExpStmt exp -> Format.fprintf fmt "`%a;`" pp exp
   | `Fn (ident, params, stmts) ->
-    Format.fprintf fmt "fn %a(%a) { %a }" pp ident (pp_list pp) params (pp_list pp) stmts
+    Format.fprintf
+      fmt
+      "fn %a( %a ) { %a }"
+      pp
+      ident
+      (pp_list pp)
+      params
+      (pp_list pp)
+      stmts
   | `Array exps -> Format.fprintf fmt "[ %a ]" (pp_list pp) exps
-  | `Hash pairs -> Format.fprintf fmt "{ %a }" (pp_list ~sep:"," pp) pairs
+  | `Hash pairs -> Format.fprintf fmt "{ %a }" (pp_list ~sep:", " pp) pairs
   | `Pair (key, value) -> Format.fprintf fmt "%a: %a" pp key pp value
+  | `Add (left, right) -> Format.fprintf fmt "%a + %a" pp left pp right
+  | `Sub (left, right) -> Format.fprintf fmt "%a - %a" pp left pp right
+  | `Mult (left, right) -> Format.fprintf fmt "%a * %a" pp left pp right
+  | `Div (left, right) -> Format.fprintf fmt "%a / %a" pp left pp right
+  | `Eq (left, right) -> Format.fprintf fmt "%a == %a" pp left pp right
+  | `Neq (left, right) -> Format.fprintf fmt "%a != %a" pp left pp right
+  | `Lt (left, right) -> Format.fprintf fmt "%a < %a" pp left pp right
+  | `Gt (left, right) -> Format.fprintf fmt "%a > %a" pp left pp right
+  | `Call (ident, params) ->
+    Format.fprintf fmt "%a(%a)" pp ident (pp_list ~sep:", " pp) params
+  | `Index (ident, idx) -> Format.fprintf fmt "%a[%a]" pp ident pp idx
   | _ -> Format.printf "Unmatched"
 ;;
 
@@ -270,6 +339,14 @@ let () =
      let arr = [1,2,3,\"2\"];\n\
      let arr_empty = [];\n\
      let hash = { first : 1, second : \"abc\" };\n\
-     let hash_empty = { };\n"
+     let hash_empty = { };\n\
+     let x = 1 + 2;\n\
+     let x = 1 + 2 * 3 / 4 - 5;\n\
+     let eq = (true == false) != true;\n\
+     let lt = 1 < 2;\n\
+     let gt = 3 > 2;\n\
+     let x = ident();\n\
+     let y = ident(1,2,b);\n\
+     let idx = arr[2];\n"
   |> fun ast -> Format.printf "Eval: %a@." pp ast
 ;;
