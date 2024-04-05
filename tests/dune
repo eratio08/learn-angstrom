@@ -1,0 +1,9 @@
+(tests
+ (names test_monkey)
+ (libraries monkey))
+
+(env
+ (dev
+  (flags
+   (:standard -warn-error -A))))
+

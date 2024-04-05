@@ -1,0 +1,9 @@
+(library
+ (name monkey)
+ (libraries angstrom))
+
+(env
+ (dev
+  (flags
+   (:standard -warn-error -A))))
+
