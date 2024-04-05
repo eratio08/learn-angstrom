@@ -7,13 +7,28 @@ Learning about [Angstrom](https://v3.ocaml.org/p/angstrom/0.15.0/doc/Angstrom/in
 ## Progress
 
 Parse
-[x] `let` statements
-[X] boolean expressions
-[X] bang expressions
-[X] grouping expressions
-[X] if expressions
-[X] function literal
-[X] string literal
-[X] array literal
-[ ] hash literal
-[X] identifier literal
+* [x] `let` statement
+* [x] `return` statement
+* [x] expression statement
+* [x] boolean expressions
+* [x] bang expressions
+* [x] grouping expressions
+* [x] if expressions
+* [x] function literal
+* [x] string literal
+* [x] array literal
+* [x] hash literal
+* [x] identifier literal
+* [x] addition
+* [x] substation
+* [x] multiplication
+* [x] division
+* [x] equality
+* [x] not equality
+* [x] lower than
+* [x] greater than
+* [x] function call
+* [x] array index
+
+
+
