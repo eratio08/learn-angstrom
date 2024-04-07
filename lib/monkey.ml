@@ -5,7 +5,7 @@
 
    statement ::= let-statement | return-statement | expression-statement
    let-statement ::= "let" identifier "=" expression ';'
-   identifier ::= ??
+   identifier ::= char | char(chars | digits)
    expression ::= prefix-expression | infix-expression
    prefix-expression ::= | '!' expression
                          | '-' expression
@@ -87,14 +87,10 @@ let identifier =
   take_while1 (fun c -> is_letter c || is_digit c || is_allowed_signs c) <* ws
 ;;
 
-(* Repeated application of parser [p] separated by left associative operation op. *)
-(* let chain_l_1 p op = *)
-(*   let rec rest a = op >>= (fun f -> p >>= fun b -> rest (f a b)) <|> return a in *)
-(*   p >>= fun a -> rest a *)
-(* ;; *)
-
 (* tokens *)
 let semicolon = token (char ';')
+
+(* debug helpers*)
 let debug fmt s = Format.printf "#Debug: %a@." fmt s
 let debug_str s = debug Format.pp_print_string s
 
@@ -105,8 +101,9 @@ let ( >>? ) (t : 'a t) s : 'a t =
   a
 ;;
 
-(* = *)
+(* *)
 let rec stmt () =
+  (* <identifier> Parser *)
   let ident =
     peek_char_fail
     >>= (function
@@ -116,6 +113,7 @@ let rec stmt () =
     |> token
     >>? "ident"
   in
+  (* <digits> Parser *)
   let digits =
     take_while1 is_digit
     >>= (fun digit -> return (`Int (int_of_string digit)))
@@ -125,24 +123,30 @@ let rec stmt () =
   (* Expression *)
   let rec exp () =
     (* Prefix Expressions *)
+    (* <!><exp> Parser *)
     let bang_exp =
       char_sym '!' >>= (fun _ -> exp ()) >>= fun v -> return (`Bang v) >>? "bank_exp"
     in
+    (* <-><exp> Parser *)
     let neg_exp =
       char_sym '-' >>= (fun _ -> exp ()) >>= fun v -> return (`Neg v) >>? "minus_exp"
     in
+    (* <true>|<false> Parser *)
     let boolean =
       symbol "true"
       <|> symbol "false"
       >>= fun b -> return (`Bool (bool_of_string b)) >>? "boolean_exp"
     in
+    (* '('<exp>')' Parser *)
     let grouping_exp =
       char_sym '('
       >>= fun _ -> exp () <* char_sym ')' >>= fun v -> return (`Group v) >>? "grouping"
     in
+    (* '{'<exp>'}' Parser *)
     let block_stmt =
       char_sym '{' >>= fun _ -> many (stmt ()) <* char_sym '}' >>? "block"
     in
+    (* "if"'('<exp>')<block>' Parser *)
     let if_exp =
       symbol "if" *> char_sym '('
       >>= (fun _ -> exp ())
@@ -150,9 +154,11 @@ let rec stmt () =
       >>= fun condition ->
       block_stmt >>= fun stmts -> return (`If (condition, stmts)) >>? "if_exp"
     in
+    (* <exp>|<exp>','<fn-params>  Parser *)
     let fn_params =
       peek_char_fail >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token >>? "fn_paramas"
     in
+    (* "fn"'('<fn-params>')'<block> Parser *)
     let fn_literal =
       symbol "fn" *> ident
       >>= fun ident ->
@@ -162,10 +168,12 @@ let rec stmt () =
       >>= fun params ->
       block_stmt >>= fun stmts -> return (`Fn (ident, params, stmts)) >>? "fn_literal"
     in
+    (* '"'<utf8>'"' Parser *)
     let string_literal =
       char_sym '"' *> take_till (fun c -> Char.equal '"' c)
       >>= fun str -> return (`String str) <* char_sym '"'
     in
+    (* <exp>|<exp>,<exp_list> Parser *)
     let exp_list =
       peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token >>? "exp_list"
     in
