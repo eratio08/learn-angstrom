@@ -133,17 +133,6 @@ module Ast = struct
   (* tokens *)
   let semicolon = token (char ';')
 
-  (* debug helpers*)
-  let debug fmt s = Format.printf "#Debug: %a@." fmt s
-  let debug_str s = debug Format.pp_print_string s
-
-  let ( >>? ) (t : 'a t) s : 'a t =
-    t
-    >>| fun a ->
-    debug_str s;
-    a
-  ;;
-
   (* *)
   let rec stmt () =
     (* <identifier> Parser *)
@@ -154,44 +143,32 @@ module Ast = struct
                identifier >>= fun identifier -> return (Identifier identifier)
              | _ -> fail "Identifier need to start with a character")
       |> token
-      >>? "ident"
     in
     (* <digits> Parser *)
     let digits =
       take_while1 is_digit
       >>= (fun digit -> return (Integer (int_of_string digit)))
       |> token
-      >>? "digits"
     in
     (* Expression *)
     let rec exp () =
       (* Prefix Expressions *)
       (* <!><exp> Parser *)
-      let bang_exp =
-        char_sym '!' >>= (fun _ -> exp ()) >>= fun v -> return (Bang v) >>? "bank_exp"
-      in
+      let bang_exp = char_sym '!' >>= (fun _ -> exp ()) >>= fun v -> return (Bang v) in
       (* <-><exp> Parser *)
-      let neg_exp =
-        char_sym '-'
-        >>= (fun _ -> exp ())
-        >>= fun v -> return (Negation v) >>? "minus_exp"
-      in
+      let neg_exp = char_sym '-' >>= (fun _ -> exp ()) >>= fun v -> return (Negation v) in
       (* <true>|<false> Parser *)
       let boolean =
-        symbol "true"
-        <|> symbol "false"
-        >>= fun b -> return (Bool (bool_of_string b)) >>? "boolean_exp"
+        symbol "true" <|> symbol "false" >>= fun b -> return (Bool (bool_of_string b))
       in
       (* '('<exp>')' Parser *)
       let grouping_exp =
-        char_sym '('
-        >>= fun _ -> exp () <* char_sym ')' >>= fun v -> return (Group v) >>? "grouping"
+        char_sym '(' >>= fun _ -> exp () <* char_sym ')' >>= fun v -> return (Group v)
       in
       (* '{'<exp>'}' Parser *)
       let block_stmt =
         char_sym '{'
-        >>= fun _ ->
-        many (stmt ()) <* char_sym '}' >>= fun stmts -> return (Block stmts) >>? "block"
+        >>= fun _ -> many (stmt ()) <* char_sym '}' >>= fun stmts -> return (Block stmts)
       in
       (* "if"'('<exp>')'<block>"else"<block> | "if"'('<exp>')'<block> Parser *)
       let if_exp =
@@ -209,12 +186,10 @@ module Ast = struct
              <* char_sym ')'
              >>= fun condition ->
              block_stmt >>= fun stmts -> return (If (condition, stmts)))
-        >>? "if_exp"
       in
       (* <exp>|<exp>','<fn-params>  Parser *)
       let fn_params =
-        peek_char_fail
-        >>= fun _ -> sep_by (char_sym ',') identifier |> token >>? "fn_paramas"
+        peek_char_fail >>= fun _ -> sep_by (char_sym ',') identifier |> token
       in
       (* "fn"'('<fn-params>')'<block> Parser *)
       let fn_literal =
@@ -224,8 +199,7 @@ module Ast = struct
         >>= (fun _ -> fn_params)
         <* char_sym ')'
         >>= fun params ->
-        block_stmt
-        >>= fun stmts -> return (Function (ident, params, stmts)) >>? "fn_literal"
+        block_stmt >>= fun stmts -> return (Function (ident, params, stmts))
       in
       (* '"'<utf8>'"' Parser *)
       let string_literal =
@@ -233,31 +207,24 @@ module Ast = struct
         >>= fun str -> return (String str) <* char_sym '"'
       in
       (* <exp>|<exp>,<exp_list> Parser *)
-      let exp_list =
-        peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token >>? "exp_list"
-      in
+      let exp_list = peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token in
       let array_literal =
         char_sym '['
-        >>= fun _ ->
-        exp_list <* char_sym ']' >>= fun exps -> return (Array exps) >>? "array_literal"
+        >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (Array exps)
       in
       let pair =
         peek_char_fail
         >>= fun _ ->
         exp ()
         >>= fun key ->
-        char_sym ':'
-        >>= fun _ -> exp () >>= fun value -> return (key, value) |> token >>? "pair"
+        char_sym ':' >>= fun _ -> exp () >>= fun value -> return (key, value) |> token
       in
-      let pairs = sep_by (char_sym ',') pair >>? "pairs" in
+      let pairs = sep_by (char_sym ',') pair in
       let hash_literal =
         char_sym '{'
-        >>= fun _ ->
-        pairs <* char_sym '}' >>= fun pairs -> return (Hash pairs) >>? "hash_literal"
+        >>= fun _ -> pairs <* char_sym '}' >>= fun pairs -> return (Hash pairs)
       in
-      let prefix_exp =
-        neg_exp <|> bang_exp >>= fun exp -> return (Prefix exp) >>? "prefix_exp"
-      in
+      let prefix_exp = neg_exp <|> bang_exp >>= fun exp -> return (Prefix exp) in
       (* Infix Expressions *)
       let addition left =
         char_sym '+' >>= fun _ -> exp () >>= fun right -> return (Add (left, right))
@@ -322,12 +289,11 @@ module Ast = struct
       ws
       *> (peek_char
           >>= function
-          | None -> fail "" >>? "infix fail"
+          | None -> fail ""
           | Some c ->
             (match c with
              | ';' | ')' | ',' | ']' | '}' | ':' -> return left
              | _ -> infix_exp left))
-      >>? "exp"
     in
     (* Statements *)
     let let_stmt =
@@ -337,20 +303,19 @@ module Ast = struct
           char_sym '='
           >>= fun _ -> exp () >>= fun value -> return (LetStatement (ident, value)))
       <* semicolon
-      >>? "let_stmt"
     in
     let return_stmt =
       symbol "return"
       >>= (fun _ -> exp ())
-      >>= fun value -> return (ReturnStatement value) >>? "return_stmt"
+      >>= fun value -> return (ReturnStatement value)
     in
     let exp_stmt =
       peek_char_fail
       >>= (fun _ -> exp ())
       <* char_sym ';'
-      >>= fun exp -> return (ExpressionStatement exp) >>? "exp_stmt"
+      >>= fun exp -> return (ExpressionStatement exp)
     in
-    let_stmt <|> return_stmt <|> exp_stmt >>? "Stmt done\n"
+    let_stmt <|> return_stmt <|> exp_stmt
   ;;
 
   let stmts = many (stmt ()) >>= fun ls -> return (Program ls)
@@ -726,7 +691,4 @@ end
 
 (* Eval *)
 
-let eval str =
-  Ast.debug_str "eval";
-  parse_string ~consume:Prefix Ast.stmts str
-;;
+let eval str = parse_string ~consume:Prefix Ast.stmts str
