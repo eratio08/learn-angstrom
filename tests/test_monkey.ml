@@ -76,7 +76,7 @@ let () =
      let digits = 12;\n\
      let some_other = (!true);\n\
      if(true){ true; false;};\n\
-     if(true){ true; false;} else { true; };\n\
+     if(true){ true; false;} else { return true; };\n\
      let x = some_name;\n\
      fn some_func(a, b) { true; };\n\
      let y = \"some string \";\n\
@@ -98,7 +98,7 @@ let () =
 ;;
 
 let () =
-  eval "let x = 2;\n x + x * x;"
+  eval "let x = 2;\nx + x * x;\nif (x != 2) { 1; } else { return \"bla\"; };\n"
   |> function
   | Error err -> Format.printf "Error: %s!" err
   | Ok program ->

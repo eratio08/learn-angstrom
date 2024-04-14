@@ -57,8 +57,6 @@
 open Angstrom
 
 module Ast = struct
-  (* type identifier = Identifier of string *)
-
   type prefix_expression =
     | Bang of expression
     | Negation of expression
@@ -307,6 +305,7 @@ module Ast = struct
     let return_stmt =
       symbol "return"
       >>= (fun _ -> exp ())
+      <* char_sym ';'
       >>= fun value -> return (ReturnStatement value)
     in
     let exp_stmt =
