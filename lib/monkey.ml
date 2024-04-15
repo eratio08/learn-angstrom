@@ -333,6 +333,7 @@ module Evaluator = struct
     | Error of string
     | Integer of int
     | Array of obj list
+    | Hash of (obj * obj) list
     | Fn of (obj list -> obj)
     | Function of string * string list * Ast.block_statement * env
     | String of string
@@ -371,11 +372,29 @@ module Evaluator = struct
       | Error msg -> Format.fprintf fmt "Error: %s" msg
       | Integer i -> Format.fprintf fmt "%d" i
       | Array l -> Format.fprintf fmt "[%a]" (pp_list pp) l
+      | Hash h -> Format.fprintf fmt "{%a}" (pp_list pp_pair) h
       | Fn _ -> Format.fprintf fmt "builtin function"
       | String s -> Format.fprintf fmt "%s" s
-      | True -> Format.fprintf fmt "True"
-      | False -> Format.fprintf fmt "False"
+      | True -> Format.fprintf fmt "true"
+      | False -> Format.fprintf fmt "false"
       | Function (name, _, _, _) -> Format.fprintf fmt "fn %s(..){..}" name
+
+    and pp_pair fmt (key, value) = Format.fprintf fmt "%a: %a" pp key pp value
+
+    let rec equal t1 t2 =
+      match t1, t2 with
+      | Null, Null -> true
+      | Return o1, Return o2 -> equal o1 o2
+      | Error m1, Error m2 -> String.equal m1 m2
+      | Integer i1, Integer i2 -> Int.equal i1 i2
+      | Array l1, Array l2 -> List.equal equal l1 l2
+      | Hash h1, Hash h2 ->
+        List.equal (fun (k1, v1) (k2, v2) -> equal k1 k2 && equal v1 v2) h1 h2
+      | String s1, String s2 -> String.equal s1 s2
+      | True, True | False, False -> true
+      | Function (n1, _, _, _), Function (n2, _, _, _) -> String.equal n1 n2
+      | Fn _, Fn _ -> false
+      | _, _ -> false
     ;;
   end
 
@@ -433,7 +452,7 @@ module Evaluator = struct
            (fun args ->
              List.fold_left
                (fun acc a ->
-                 Format.printf "%a" Object.pp a;
+                 Format.printf "%a\n" Object.pp a;
                  acc)
                Null
                args))
@@ -466,7 +485,10 @@ module Evaluator = struct
           let eval_identifier env identifier =
             match Environment.get identifier env with
             | Some value -> env, value
-            | None -> env, Error ("unknown identifier: " ^ identifier)
+            | None ->
+              (match built_ins identifier with
+               | Some fn -> env, fn
+               | None -> env, Error ("unknown identifier: " ^ identifier))
           in
           let eval_fn env ident params stmts =
             env, Function (ident, params, stmts, env)
@@ -579,8 +601,8 @@ module Evaluator = struct
             | (Error _ as err), _ | _, (Error _ as err) -> env, err
             | Integer i1, Integer i2 -> env, if i1 = i2 then True else False
             | String s1, String s2 -> env, if String.equal s1 s2 then True else False
-            | True, True -> env, True
-            | False, False -> env, False
+            | True, True | False, False -> env, True
+            | False, True | True, False -> env, False
             | _, _ ->
               ( env
               , Error
@@ -627,6 +649,40 @@ module Evaluator = struct
                | Fn fn, args -> env, fn args
                | _ -> env, Error "unknown function")
           in
+          let eval_infix env ident index =
+            let env, ident = eval_exp env ident in
+            let env, index = eval_exp env index in
+            match ident, index with
+            | Array arr, Integer i ->
+              if i > List.length arr - 1 then env, Null else env, List.nth arr i
+            | Hash hash, key ->
+              ( env
+              , List.find_opt (fun (k, _) -> Object.equal key k) hash
+                |> Option.map (fun (_, value) -> value)
+                |> Option.value ~default:Null )
+            | _, _ -> env, Error "invalid hash"
+          in
+          let eval_hash env pairs =
+            let pairs =
+              List.map (fun (key, value) -> eval_exp env key, eval_exp env value) pairs
+            in
+            let res =
+              List.fold_left
+                (fun acc ((_, key), (_, value)) ->
+                  match acc with
+                  | Result.Error _ as err -> err
+                  | Result.Ok m ->
+                    (match key, value with
+                     | Error _, _ -> Result.Error key
+                     | _, Error _ -> Result.Error value
+                     | _, _ -> Result.Ok ((key, value) :: m)))
+                (Result.Ok [])
+                pairs
+            in
+            match res with
+            | Result.Error err -> env, err
+            | Result.Ok l -> env, Hash l
+          in
           let eval_prefix env = function
             | Ast.Bang exp -> eval_bang env exp
             | Ast.Negation exp -> eval_negation env exp
@@ -641,7 +697,7 @@ module Evaluator = struct
             | Ast.Eq (left, right) -> eval_eq env right left
             | Ast.Neq (left, right) -> eval_neq env right left
             | Ast.Call (ident, args) -> eval_call env ident args
-            | Ast.Index (name, index) -> env, Error ""
+            | Ast.Index (ident, index) -> eval_infix env ident index
           in
           match ast with
           | Ast.Prefix prefix -> eval_prefix env prefix
@@ -655,8 +711,9 @@ module Evaluator = struct
           | Ast.Integer int -> env, Integer int
           | Ast.Bool b -> bool_to_bool_obj env b
           | Ast.String str -> env, String str
-          | Ast.Group exp -> env, Error ""
-          | Ast.Hash pairs -> env, Error ""
+          | Ast.Group exp ->
+            env, Error "" (* Should not be part of as but rather turn in to precedence *)
+          | Ast.Hash pairs -> eval_hash env pairs
         in
         let eval_let env ident value =
           let env, result = eval_exp env value in

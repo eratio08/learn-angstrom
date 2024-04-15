@@ -82,7 +82,7 @@ let () =
      let y = \"some string \";\n\
      let arr = [1,2,3,\"2\"];\n\
      let arr_empty = [];\n\
-     let hash = { first : 1, second : \"abc\" };\n\
+     let hash = { first : 1, second : \"abc\", 1 : 2 };\n\
      let hash_empty = { };\n\
      let x = 1 + 2;\n\
      let x = 1 + 2 * 3 / 4 - 5;\n\
@@ -91,6 +91,7 @@ let () =
      let gt = 3 > 2;\n\
      let x = ident();\n\
      let y = ident(1,2,b);\n\
+     if (x != 2) { puts(1); } else { return \"bla\"; };\n\
      let idx = arr[2];\n"
   |> function
   | Error err -> Format.printf "Error: %s!" err
@@ -98,7 +99,18 @@ let () =
 ;;
 
 let () =
-  eval "let x = 2;\nx + x * x;\nif (x != 2) { 1; } else { return \"bla\"; };\n"
+  eval
+    "let x = 2;\n\
+     puts(x + x * x);\n\
+     puts(\"~~\");\n\
+     let y = { \"a\": 2, 2: 1 };\n\
+     puts(\"Hash:\");\n\
+     puts(y);\n\
+     puts(y[2]);\n\
+     y;\n\
+     puts(true == false);\n\
+     puts(true != false);\n\
+     if (x != 2) { return 1; } else { return \"bla\"; };\n"
   |> function
   | Error err -> Format.printf "Error: %s!" err
   | Ok program ->
