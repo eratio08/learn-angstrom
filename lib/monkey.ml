@@ -1,38 +1,33 @@
 (*
    Monkey Lang
 
-   Grammar (BNF)
+   Grammar (EBNF/BNF)
 
    statement ::= let-statement | return-statement | expression-statement
    let-statement ::= "let" identifier "=" expression ';'
+   return-statement ::= 'return' expression ';'
+   expression-statement ::= expression ';'
    identifier ::= char | char(chars | digits)
-   expression ::= | prefix-expression
-                  | integer-literal
-                  | boolean
-                  | group-expression
-                  | if-expression
-                  | function-literal
-                  | string-literal
-                  | array-literal
-                  | hash-literal
-                  | identifier
-                  | infix-expression
-   prefix-expression ::= | '!' expression
-                         | '-' expression
-   infix-expression ::= | expression '+' expression
-                        | expression '-' expression
-                        | expression '/' expression
-                        | expression '*' expression
-                        | expression "==" expression
-                        | expression "!=" expression
-                        | expression '<' expression
-                        | expression '>' expression
-                        | call-expression
-                        | index-expression
+   (* The precedence climbing method *)
+   expression ::= equality-expression
+   equality-expression ::= comparator-expression ( ( '==' | '!=' ) additive-expression ) *
+   comparator-expression ::= additive-expression ( ( '<' | '>' ) additive-expression ) *
+   additive-expression ::= multiplicative-expression ( ( '+' | '-' ) multiplicative-expression ) *
+   multiplicative-expression ::= primary ( ( '*' | '/' ) primary ) *
+   primary ::= | '(' expression ')'
+               | integer-literal
+               | string-literal
+               | boolean
+               | if-expression
+               | function-literal
+               | array-literal
+               | hash-literal
+               | '-' primary
+               | '!' primary
+               | identifier
+               | call-expression
    integer-literal ::= digit | digit integer-literal
-   digit ::= '0' .. '9'
    boolean ::= "true" | "false"
-   group-expression ::= '(' expression ')'
    if-expression ::=| "if" '(' expression ')' block-statement
                     | "if" '(' expression ')' block-statement "else" block-statement
    block-statement ::= '{' many statement '}'
@@ -50,18 +45,21 @@
    pair ::= expression ':' expression
    call-expression ::= expression '(' expression-list ')'
    index-expression ::= expression '[' expression ']'
-   return-statement ::= 'return' expression ';'
-   expression-statement ::= expression ';'
 *)
 
 open Angstrom
 
 module Ast = struct
-  type prefix_expression =
-    | Bang of expression
-    | Negation of expression
-
-  and infix_expression =
+  type expression =
+    | Integer of int
+    | String of string
+    | Bool of bool
+    | Array of expression list
+    | Hash of (expression * expression) list
+    | Function of string * string list * block_statement
+    | If of expression * block_statement
+    | IfElse of expression * block_statement * block_statement
+    | Identifier of string
     | Add of expression * expression
     | Sub of expression * expression
     | Mul of expression * expression
@@ -72,20 +70,9 @@ module Ast = struct
     | Gt of expression * expression
     | Call of expression * expression list
     | Index of expression * expression
-
-  and expression =
-    | Prefix of prefix_expression
-    | Infix of infix_expression
-    | Integer of int
-    | String of string
-    | Bool of bool
-    | Group of expression
-    | Array of expression list
-    | Hash of (expression * expression) list
-    | Function of string * string list * block_statement
-    | If of expression * block_statement
-    | IfElse of expression * block_statement * block_statement
-    | Identifier of string
+    | Bang of expression
+    | Negation of expression
+    | ExpressionList of expression list
 
   and block_statement = Block of statement list
 
@@ -95,6 +82,121 @@ module Ast = struct
     | ExpressionStatement of expression
 
   and programm = Program of statement list
+
+  let pp fmt =
+    let rec pp_list ?(sep = "; ") fmt_a fmt = function
+      | [] -> Format.fprintf fmt ""
+      | x :: [] -> Format.fprintf fmt "%a" fmt_a x
+      | x :: xs -> Format.fprintf fmt "%a%s%a" fmt_a x sep (pp_list ~sep fmt_a) xs
+    in
+    let rec pp_stmt fmt =
+      let pp_block fmt = function
+        | Block stmts -> Format.fprintf fmt "Block [%a]" (pp_list pp_stmt) stmts
+      in
+      let rec pp_exp fmt = function
+        | Bang exp -> Format.fprintf fmt "Bang (%a)" pp_exp exp
+        | Negation exp -> Format.fprintf fmt "Negation (%a)" pp_exp exp
+        | ExpressionList es ->
+          Format.fprintf fmt "ExpressionList [%a]" (pp_list pp_exp) es
+        | Add (left, right) -> Format.fprintf fmt "Add (%a, %a)" pp_exp left pp_exp right
+        | Sub (left, right) -> Format.fprintf fmt "Sub (%a, %a)" pp_exp left pp_exp right
+        | Mul (left, right) -> Format.fprintf fmt "Mul (%a, %a)" pp_exp left pp_exp right
+        | Div (left, right) -> Format.fprintf fmt "Div (%a, %a)" pp_exp left pp_exp right
+        | Eq (left, right) -> Format.fprintf fmt "Eq (%a, %a)" pp_exp left pp_exp right
+        | Neq (left, right) -> Format.fprintf fmt "Neq (%a, %a)" pp_exp left pp_exp right
+        | Lt (left, right) -> Format.fprintf fmt "Lt (%a, %a)" pp_exp left pp_exp right
+        | Gt (left, right) -> Format.fprintf fmt "Gt (%a, %a)" pp_exp left pp_exp right
+        | Call (n, args) ->
+          Format.fprintf fmt "Call (%a, [%a])" pp_exp n (pp_list pp_exp) args
+        | Index (n, i) -> Format.fprintf fmt "Index (%a, %a)" pp_exp n pp_exp i
+        | Integer i -> Format.fprintf fmt "Integer %d" i
+        | String s -> Format.fprintf fmt "String \"%s\"" s
+        | Bool b -> Format.fprintf fmt "Bool %b" b
+        | Array a -> Format.fprintf fmt "Array [%a]" (pp_list pp_exp) a
+        | Hash h ->
+          Format.fprintf
+            fmt
+            "Hash [%a]"
+            (pp_list (fun fmt (k, v) -> Format.fprintf fmt "(%a, %a)" pp_exp k pp_exp v))
+            h
+        | Function (str, ps, block) ->
+          Format.fprintf
+            fmt
+            "Function (\"%s\", [%a], %a)"
+            str
+            (pp_list (fun fmt t -> Format.fprintf fmt "\"%s\"" t))
+            ps
+            pp_block
+            block
+        | If (cond, block) -> Format.fprintf fmt "If (%a, %a)" pp_exp cond pp_block block
+        | IfElse (cond, block, else_block) ->
+          Format.fprintf
+            fmt
+            "IfElse (%a, %a, %a)"
+            pp_exp
+            cond
+            pp_block
+            block
+            pp_block
+            else_block
+        | Identifier ident -> Format.fprintf fmt "Identifier \"%s\"" ident
+      in
+      function
+      | LetStatement (str, exp) ->
+        Format.fprintf fmt "LetStatement (\"%s\", %a)" str pp_exp exp
+      | ReturnStatement exp -> Format.fprintf fmt "ReturnStatement (%a)" pp_exp exp
+      | ExpressionStatement exp ->
+        Format.fprintf fmt "ExpressionStatement (%a)" pp_exp exp
+    in
+    function
+    | Program stmts -> Format.fprintf fmt "Program [%a]" (pp_list pp_stmt) stmts
+  ;;
+
+  let equal p1 p2 =
+    let rec equal_stmt s1 s2 =
+      let equal_block b1 b2 =
+        match b1, b2 with
+        | Block b1, Block b2 -> List.equal equal_stmt b1 b2
+      in
+      let rec equal_exp e1 e2 =
+        match e1, e2 with
+        | Bang e1, Bang e2 -> equal_exp e1 e2
+        | Negation e1, Negation e2 -> equal_exp e1 e2
+        | Add (l1, r1), Add (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Sub (l1, r1), Sub (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Mul (l1, r1), Mul (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Div (l1, r1), Div (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Eq (l1, r1), Eq (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Neq (l1, r1), Neq (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Identifier s1, Identifier s2 -> String.equal s1 s2
+        | Integer i1, Integer i2 -> Int.equal i1 i2
+        | Bool b1, Bool b2 -> Bool.equal b1 b2
+        | String s1, String s2 -> String.equal s1 s2
+        | Array a1, Array a2 -> List.equal equal_exp a1 a2
+        | Hash h1, Hash h2 ->
+          List.equal (fun (k1, v1) (k2, v2) -> equal_exp k1 k2 && equal_exp v1 v2) h1 h2
+        | Function (n1, p1, b1), Function (n2, p2, b2) ->
+          String.equal n1 n2 && List.equal String.equal p1 p2 && equal_block b1 b2
+        | If (e1, b1), If (e2, b2) -> equal_exp e1 e2 && equal_block b1 b2
+        | IfElse (e1, b1, eb1), IfElse (e2, b2, eb2) ->
+          equal_exp e1 e2 && equal_block b1 b2 && equal_block eb1 eb2
+        | ExpressionList e1, ExpressionList e2 -> List.equal equal_exp e1 e2
+        | Lt (l1, r1), Lt (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Gt (l1, r1), Gt (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
+        | Call (n1, p1), Call (n2, p2) -> equal_exp n1 n2 && List.equal equal_exp p1 p2
+        | Index (a1, i1), Index (a2, i2) -> equal_exp a1 a2 && equal_exp i1 i2
+        | _, _ -> false
+      in
+      match s1, s2 with
+      | LetStatement (s1, exp1), LetStatement (s2, exp2) ->
+        String.equal s1 s2 && equal_exp exp1 exp2
+      | ReturnStatement e1, ReturnStatement e2 -> equal_exp e1 e2
+      | ExpressionStatement e1, ExpressionStatement e2 -> equal_exp e1 e2
+      | _, _ -> false
+    in
+    match p1, p2 with
+    | Program s1, Program s2 -> List.equal equal_stmt s1 s2
+  ;;
 
   (* predicates *)
   let is_ws = function
@@ -148,150 +250,168 @@ module Ast = struct
       >>= (fun digit -> return (Integer (int_of_string digit)))
       |> token
     in
+    (* '"'<utf8>'"' Parser *)
+    let string_literal =
+      char_sym '"' *> take_till (fun c -> Char.equal '"' c)
+      >>= fun str -> return (String str) <* char_sym '"'
+    in
+    (* <true>|<false> Parser *)
+    let boolean =
+      symbol "true" <|> symbol "false" >>= fun b -> return (Bool (bool_of_string b))
+    in
     (* Expression *)
-    let rec exp () =
-      (* Prefix Expressions *)
-      (* <!><exp> Parser *)
-      let bang_exp = char_sym '!' >>= (fun _ -> exp ()) >>= fun v -> return (Bang v) in
-      (* <-><exp> Parser *)
-      let neg_exp = char_sym '-' >>= (fun _ -> exp ()) >>= fun v -> return (Negation v) in
-      (* <true>|<false> Parser *)
-      let boolean =
-        symbol "true" <|> symbol "false" >>= fun b -> return (Bool (bool_of_string b))
+    let rec expression () =
+      let rec primary () =
+        let bang =
+          char_sym '!' >>= fun _ -> primary () >>= fun exp -> return (Bang exp)
+        in
+        let negation =
+          char_sym '-' >>= fun _ -> primary () >>= fun exp -> return (Negation exp)
+        in
+        let block_stmt =
+          char_sym '{'
+          >>= fun _ ->
+          many (stmt ()) <* char_sym '}' >>= fun stmts -> return (Block stmts)
+        in
+        (* "if"'('<exp>')'<block>"else"<block> | "if"'('<exp>')'<block> Parser *)
+        let if_exp =
+          symbol "if" *> char_sym '('
+          >>= (fun _ -> expression ())
+          <* char_sym ')'
+          >>= (fun condition ->
+                block_stmt
+                >>= fun stmts ->
+                symbol "else" *> block_stmt
+                >>= fun else_block_stmt ->
+                return (IfElse (condition, stmts, else_block_stmt)))
+          <|> (symbol "if" *> char_sym '('
+               >>= (fun _ -> expression ())
+               <* char_sym ')'
+               >>= fun condition ->
+               block_stmt >>= fun stmts -> return (If (condition, stmts)))
+        in
+        (* <exp>|<exp>','<fn-params>  Parser *)
+        let fn_params =
+          peek_char_fail >>= fun _ -> sep_by (char_sym ',') identifier |> token
+        in
+        (* "fn"'('<fn-params>')'<block> Parser *)
+        let fn_literal =
+          symbol "fn" *> identifier
+          >>= fun ident ->
+          char_sym '('
+          >>= (fun _ -> fn_params)
+          <* char_sym ')'
+          >>= fun params ->
+          block_stmt >>= fun stmts -> return (Function (ident, params, stmts))
+        in
+        (* <exp>|<exp>,<exp_list> Parser *)
+        let exp_list =
+          peek_char >>= fun _ -> sep_by (char_sym ',') (expression ()) |> token
+        in
+        let array_literal =
+          char_sym '['
+          >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (Array exps)
+        in
+        let pair =
+          peek_char_fail
+          >>= fun _ ->
+          expression ()
+          >>= fun key ->
+          char_sym ':'
+          >>= fun _ -> expression () >>= fun value -> return (key, value) |> token
+        in
+        let pairs = sep_by (char_sym ',') pair in
+        let hash_literal =
+          char_sym '{'
+          >>= fun _ -> pairs <* char_sym '}' >>= fun pairs -> return (Hash pairs)
+        in
+        let call =
+          ident
+          >>= fun ident ->
+          char_sym '('
+          >>= fun _ ->
+          sep_by (char_sym ',') (expression ())
+          <* char_sym ')'
+          >>= fun args -> return (Call (ident, args))
+        in
+        let index =
+          ident
+          >>= fun ident ->
+          char_sym '[' *> expression ()
+          <* char_sym ']'
+          >>= fun idx -> return (Index (ident, idx))
+        in
+        digits
+        <|> boolean
+        <|> string_literal
+        <|> bang
+        <|> negation
+        <|> array_literal
+        <|> hash_literal
+        <|> if_exp
+        <|> fn_literal
+        <|> call
+        <|> index
+        <|> (char_sym '(' >>= fun _ -> expression () <* char_sym ')')
+        <|> ident
       in
-      (* '('<exp>')' Parser *)
-      let grouping_exp =
-        char_sym '(' >>= fun _ -> exp () <* char_sym ')' >>= fun v -> return (Group v)
+      let multiapplicative_expression =
+        primary ()
+        >>= (fun left ->
+              many1
+                (char_sym '*'
+                 <|> char_sym '/'
+                 >>= fun c ->
+                 primary ()
+                 >>= fun right ->
+                 return
+                   (if Char.equal '*' c then Mul (left, right) else Div (left, right)))
+              >>= fun exp -> return (ExpressionList exp))
+        <|> primary ()
       in
-      (* '{'<exp>'}' Parser *)
-      let block_stmt =
-        char_sym '{'
-        >>= fun _ -> many (stmt ()) <* char_sym '}' >>= fun stmts -> return (Block stmts)
+      let additive_expression =
+        multiapplicative_expression
+        >>= (fun left ->
+              many1
+                (char_sym '+'
+                 <|> char_sym '-'
+                 >>= fun c ->
+                 multiapplicative_expression
+                 >>= fun right ->
+                 return
+                   (if Char.equal '+' c then Add (left, right) else Sub (left, right)))
+              >>= fun exp -> return (ExpressionList exp))
+        <|> multiapplicative_expression
       in
-      (* "if"'('<exp>')'<block>"else"<block> | "if"'('<exp>')'<block> Parser *)
-      let if_exp =
-        symbol "if" *> char_sym '('
-        >>= (fun _ -> exp ())
-        <* char_sym ')'
-        >>= (fun condition ->
-              block_stmt
-              >>= fun stmts ->
-              symbol "else" *> block_stmt
-              >>= fun else_block_stmt ->
-              return (IfElse (condition, stmts, else_block_stmt)))
-        <|> (symbol "if" *> char_sym '('
-             >>= (fun _ -> exp ())
-             <* char_sym ')'
-             >>= fun condition ->
-             block_stmt >>= fun stmts -> return (If (condition, stmts)))
+      let comparator_expression =
+        additive_expression
+        >>= (fun left ->
+              many1
+                (char_sym '<'
+                 <|> char_sym '>'
+                 >>= fun s ->
+                 additive_expression
+                 >>= fun right ->
+                 return (if Char.equal '<' s then Lt (left, right) else Gt (left, right))
+                )
+              >>= fun exp -> return (ExpressionList exp))
+        <|> additive_expression
       in
-      (* <exp>|<exp>','<fn-params>  Parser *)
-      let fn_params =
-        peek_char_fail >>= fun _ -> sep_by (char_sym ',') identifier |> token
+      let equality_expression =
+        comparator_expression
+        >>= (fun left ->
+              many1
+                (symbol "=="
+                 <|> symbol "!="
+                 >>= fun s ->
+                 additive_expression
+                 >>= fun right ->
+                 return
+                   (if String.equal "==" s then Eq (left, right) else Neq (left, right)))
+              >>= fun exp -> return (ExpressionList exp))
+        <|> comparator_expression
       in
-      (* "fn"'('<fn-params>')'<block> Parser *)
-      let fn_literal =
-        symbol "fn" *> identifier
-        >>= fun ident ->
-        char_sym '('
-        >>= (fun _ -> fn_params)
-        <* char_sym ')'
-        >>= fun params ->
-        block_stmt >>= fun stmts -> return (Function (ident, params, stmts))
-      in
-      (* '"'<utf8>'"' Parser *)
-      let string_literal =
-        char_sym '"' *> take_till (fun c -> Char.equal '"' c)
-        >>= fun str -> return (String str) <* char_sym '"'
-      in
-      (* <exp>|<exp>,<exp_list> Parser *)
-      let exp_list = peek_char >>= fun _ -> sep_by (char_sym ',') (exp ()) |> token in
-      let array_literal =
-        char_sym '['
-        >>= fun _ -> exp_list <* char_sym ']' >>= fun exps -> return (Array exps)
-      in
-      let pair =
-        peek_char_fail
-        >>= fun _ ->
-        exp ()
-        >>= fun key ->
-        char_sym ':' >>= fun _ -> exp () >>= fun value -> return (key, value) |> token
-      in
-      let pairs = sep_by (char_sym ',') pair in
-      let hash_literal =
-        char_sym '{'
-        >>= fun _ -> pairs <* char_sym '}' >>= fun pairs -> return (Hash pairs)
-      in
-      let prefix_exp = neg_exp <|> bang_exp >>= fun exp -> return (Prefix exp) in
-      (* Infix Expressions *)
-      let addition left =
-        char_sym '+' >>= fun _ -> exp () >>= fun right -> return (Add (left, right))
-      in
-      let substract left =
-        char_sym '-' >>= fun _ -> exp () >>= fun right -> return (Sub (left, right))
-      in
-      let multiplication left =
-        char_sym '*' >>= fun _ -> exp () >>= fun right -> return (Mul (left, right))
-      in
-      let division left =
-        char_sym '/' >>= fun _ -> exp () >>= fun right -> return (Div (left, right))
-      in
-      let eq left =
-        symbol "==" >>= fun _ -> exp () >>= fun right -> return (Eq (left, right))
-      in
-      let neq left =
-        symbol "!=" >>= fun _ -> exp () >>= fun right -> return (Neq (left, right))
-      in
-      let lt left =
-        char_sym '<' >>= fun _ -> exp () >>= fun right -> return (Lt (left, right))
-      in
-      let gt left =
-        char_sym '>' >>= fun _ -> exp () >>= fun right -> return (Gt (left, right))
-      in
-      let call ident =
-        char_sym '('
-        >>= fun _ ->
-        sep_by (char_sym ',') (exp ())
-        <* char_sym ')'
-        >>= fun args -> return (Call (ident, args))
-      in
-      let index ident =
-        char_sym '['
-        >>= fun _ -> exp () <* char_sym ']' >>= fun idx -> return (Index (ident, idx))
-      in
-      let infix_exp left =
-        addition left
-        <|> substract left
-        <|> multiplication left
-        <|> division left
-        <|> eq left
-        <|> neq left
-        <|> lt left
-        <|> gt left
-        <|> call left
-        <|> index left
-        >>= fun exp -> return (Infix exp)
-      in
-      (* *)
-      prefix_exp
-      <|> digits
-      <|> boolean
-      <|> grouping_exp
-      <|> if_exp
-      <|> fn_literal
-      <|> string_literal
-      <|> array_literal
-      <|> hash_literal
-      <|> ident
-      >>= fun left ->
-      ws
-      *> (peek_char
-          >>= function
-          | None -> fail ""
-          | Some c ->
-            (match c with
-             | ';' | ')' | ',' | ']' | '}' | ':' -> return left
-             | _ -> infix_exp left))
+      equality_expression
     in
     (* Statements *)
     let let_stmt =
@@ -299,18 +419,19 @@ module Ast = struct
       *> (identifier
           >>= fun ident ->
           char_sym '='
-          >>= fun _ -> exp () >>= fun value -> return (LetStatement (ident, value)))
+          >>= fun _ -> expression () >>= fun value -> return (LetStatement (ident, value))
+         )
       <* semicolon
     in
     let return_stmt =
       symbol "return"
-      >>= (fun _ -> exp ())
+      >>= (fun _ -> expression ())
       <* char_sym ';'
       >>= fun value -> return (ReturnStatement value)
     in
     let exp_stmt =
       peek_char_fail
-      >>= (fun _ -> exp ())
+      >>= (fun _ -> expression ())
       <* char_sym ';'
       >>= fun exp -> return (ExpressionStatement exp)
     in
@@ -686,22 +807,25 @@ module Evaluator = struct
           let eval_prefix env = function
             | Ast.Bang exp -> eval_bang env exp
             | Ast.Negation exp -> eval_negation env exp
+            | _ -> env, Error ""
           in
           let eval_infix env = function
             | Ast.Add (left, right) -> eval_addition env left right
             | Ast.Sub (left, right) -> eval_substration env left right
             | Ast.Mul (left, right) -> eval_multiplication env left right
             | Ast.Div (left, right) -> eval_devision env left right
-            | Ast.Lt (left, right) -> eval_lt env right left
-            | Ast.Gt (left, right) -> eval_gt env right left
+            (* | Ast.Lt (left, right) -> eval_lt env right left *)
+            (* | Ast.Gt (left, right) -> eval_gt env right left *)
             | Ast.Eq (left, right) -> eval_eq env right left
-            | Ast.Neq (left, right) -> eval_neq env right left
-            | Ast.Call (ident, args) -> eval_call env ident args
-            | Ast.Index (ident, index) -> eval_infix env ident index
+            | Ast.Neq (left, right) ->
+              eval_neq env right left
+              (* | Ast.Call (ident, args) -> eval_call env ident args *)
+              (* | Ast.Index (ident, index) -> eval_infix env ident index *)
+            | _ -> env, Error ""
           in
           match ast with
-          | Ast.Prefix prefix -> eval_prefix env prefix
-          | Ast.Infix infix -> eval_infix env infix
+          (* | Ast.Prefix prefix -> eval_prefix env prefix *)
+          (* | Ast.Infix infix -> eval_infix env infix *)
           | Ast.Identifier identifier -> eval_identifier env identifier
           | Ast.Function (ident, params, stmts) -> eval_fn env ident params stmts
           | Ast.Array elems -> eval_array env elems
@@ -711,9 +835,10 @@ module Evaluator = struct
           | Ast.Integer int -> env, Integer int
           | Ast.Bool b -> bool_to_bool_obj env b
           | Ast.String str -> env, String str
-          | Ast.Group exp ->
-            env, Error "" (* Should not be part of as but rather turn in to precedence *)
+          (* | Ast.Group exp -> *)
+          (*   env, Error "" (* Should not be part of as but rather turn in to precedence *) *)
           | Ast.Hash pairs -> eval_hash env pairs
+          | _ -> env, Error ""
         in
         let eval_let env ident value =
           let env, result = eval_exp env value in
