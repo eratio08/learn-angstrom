@@ -72,7 +72,6 @@ module Ast = struct
     | Index of expression * expression
     | Bang of expression
     | Negation of expression
-    | ExpressionList of expression list
 
   and block_statement = Block of statement list
 
@@ -96,8 +95,6 @@ module Ast = struct
       let rec pp_exp fmt = function
         | Bang exp -> Format.fprintf fmt "Bang (%a)" pp_exp exp
         | Negation exp -> Format.fprintf fmt "Negation (%a)" pp_exp exp
-        | ExpressionList es ->
-          Format.fprintf fmt "ExpressionList [%a]" (pp_list pp_exp) es
         | Add (left, right) -> Format.fprintf fmt "Add (%a, %a)" pp_exp left pp_exp right
         | Sub (left, right) -> Format.fprintf fmt "Sub (%a, %a)" pp_exp left pp_exp right
         | Mul (left, right) -> Format.fprintf fmt "Mul (%a, %a)" pp_exp left pp_exp right
@@ -180,7 +177,6 @@ module Ast = struct
         | If (e1, b1), If (e2, b2) -> equal_exp e1 e2 && equal_block b1 b2
         | IfElse (e1, b1, eb1), IfElse (e2, b2, eb2) ->
           equal_exp e1 e2 && equal_block b1 b2 && equal_block eb1 eb2
-        | ExpressionList e1, ExpressionList e2 -> List.equal equal_exp e1 e2
         | Lt (l1, r1), Lt (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
         | Gt (l1, r1), Gt (l2, r2) -> equal_exp l1 l2 && equal_exp r1 r2
         | Call (n1, p1), Call (n2, p2) -> equal_exp n1 n2 && List.equal equal_exp p1 p2
@@ -229,6 +225,15 @@ module Ast = struct
   let identifier =
     take_while1 (fun c -> is_letter c || is_digit c || is_allowed_signs c) <* ws
   ;;
+
+  let chain_l_1 (t : 'a t) (op : ('a -> 'a -> 'a) t) : 'a t =
+    let rec rest (a : 'a) : 'a t =
+      op >>= (fun f -> t >>= fun b -> rest (f a b)) <|> return a
+    in
+    t >>= fun a -> rest a
+  ;;
+
+  let chain_l (t : 'a t) (op : ('a -> 'a -> 'a) t) : 'a t = chain_l_1 t op <|> t
 
   (* tokens *)
   let semicolon = token (char ';')
@@ -356,60 +361,40 @@ module Ast = struct
         <|> ident
       in
       let multiapplicative_expression =
-        primary ()
-        >>= (fun left ->
-              many1
-                (char_sym '*'
-                 <|> char_sym '/'
-                 >>= fun c ->
-                 primary ()
-                 >>= fun right ->
-                 return
-                   (if Char.equal '*' c then Mul (left, right) else Div (left, right)))
-              >>= fun exp -> return (ExpressionList exp))
-        <|> primary ()
+        chain_l
+          (primary ())
+          (char_sym '*'
+           <|> char_sym '/'
+           >>= fun c ->
+           return (fun left right ->
+             if Char.equal '*' c then Mul (left, right) else Div (left, right)))
       in
       let additive_expression =
-        multiapplicative_expression
-        >>= (fun left ->
-              many1
-                (char_sym '+'
-                 <|> char_sym '-'
-                 >>= fun c ->
-                 multiapplicative_expression
-                 >>= fun right ->
-                 return
-                   (if Char.equal '+' c then Add (left, right) else Sub (left, right)))
-              >>= fun exp -> return (ExpressionList exp))
-        <|> multiapplicative_expression
+        chain_l
+          multiapplicative_expression
+          (char_sym '+'
+           <|> char_sym '-'
+           >>= fun c ->
+           return (fun left right ->
+             if Char.equal '+' c then Add (left, right) else Sub (left, right)))
       in
       let comparator_expression =
-        additive_expression
-        >>= (fun left ->
-              many1
-                (char_sym '<'
-                 <|> char_sym '>'
-                 >>= fun s ->
-                 additive_expression
-                 >>= fun right ->
-                 return (if Char.equal '<' s then Lt (left, right) else Gt (left, right))
-                )
-              >>= fun exp -> return (ExpressionList exp))
-        <|> additive_expression
+        chain_l
+          additive_expression
+          (char_sym '<'
+           <|> char_sym '>'
+           >>= fun c ->
+           return (fun left right ->
+             if Char.equal '<' c then Lt (left, right) else Gt (left, right)))
       in
       let equality_expression =
-        comparator_expression
-        >>= (fun left ->
-              many1
-                (symbol "=="
-                 <|> symbol "!="
-                 >>= fun s ->
-                 additive_expression
-                 >>= fun right ->
-                 return
-                   (if String.equal "==" s then Eq (left, right) else Neq (left, right)))
-              >>= fun exp -> return (ExpressionList exp))
-        <|> comparator_expression
+        chain_l
+          comparator_expression
+          (symbol "=="
+           <|> symbol "!="
+           >>= fun s ->
+           return (fun left right ->
+             if String.equal "==" s then Eq (left, right) else Neq (left, right)))
       in
       equality_expression
     in
@@ -770,7 +755,7 @@ module Evaluator = struct
                | Fn fn, args -> env, fn args
                | _ -> env, Error "unknown function")
           in
-          let eval_infix env ident index =
+          let eval_index env ident index =
             let env, ident = eval_exp env ident in
             let env, index = eval_exp env index in
             match ident, index with
@@ -804,28 +789,27 @@ module Evaluator = struct
             | Result.Error err -> env, err
             | Result.Ok l -> env, Hash l
           in
-          let eval_prefix env = function
-            | Ast.Bang exp -> eval_bang env exp
-            | Ast.Negation exp -> eval_negation env exp
-            | _ -> env, Error ""
-          in
-          let eval_infix env = function
-            | Ast.Add (left, right) -> eval_addition env left right
-            | Ast.Sub (left, right) -> eval_substration env left right
-            | Ast.Mul (left, right) -> eval_multiplication env left right
-            | Ast.Div (left, right) -> eval_devision env left right
-            (* | Ast.Lt (left, right) -> eval_lt env right left *)
-            (* | Ast.Gt (left, right) -> eval_gt env right left *)
-            | Ast.Eq (left, right) -> eval_eq env right left
-            | Ast.Neq (left, right) ->
-              eval_neq env right left
-              (* | Ast.Call (ident, args) -> eval_call env ident args *)
-              (* | Ast.Index (ident, index) -> eval_infix env ident index *)
-            | _ -> env, Error ""
+          let rec eval_exp_list ?(res = Null) env = function
+            | [] -> env, res
+            | e :: es ->
+              let env, e = eval_exp env e in
+              (match e with
+               | Error _ -> env, e
+               | _ -> eval_exp_list env es)
           in
           match ast with
-          (* | Ast.Prefix prefix -> eval_prefix env prefix *)
-          (* | Ast.Infix infix -> eval_infix env infix *)
+          | Ast.Bang exp -> eval_bang env exp
+          | Ast.Negation exp -> eval_negation env exp
+          | Ast.Add (left, right) -> eval_addition env left right
+          | Ast.Sub (left, right) -> eval_substration env left right
+          | Ast.Mul (left, right) -> eval_multiplication env left right
+          | Ast.Div (left, right) -> eval_devision env left right
+          | Ast.Lt (left, right) -> eval_lt env right left
+          | Ast.Gt (left, right) -> eval_gt env right left
+          | Ast.Eq (left, right) -> eval_eq env right left
+          | Ast.Neq (left, right) -> eval_neq env right left
+          | Ast.Call (ident, args) -> eval_call env ident args
+          | Ast.Index (ident, index) -> eval_index env ident index
           | Ast.Identifier identifier -> eval_identifier env identifier
           | Ast.Function (ident, params, stmts) -> eval_fn env ident params stmts
           | Ast.Array elems -> eval_array env elems
@@ -835,10 +819,7 @@ module Evaluator = struct
           | Ast.Integer int -> env, Integer int
           | Ast.Bool b -> bool_to_bool_obj env b
           | Ast.String str -> env, String str
-          (* | Ast.Group exp -> *)
-          (*   env, Error "" (* Should not be part of as but rather turn in to precedence *) *)
           | Ast.Hash pairs -> eval_hash env pairs
-          | _ -> env, Error ""
         in
         let eval_let env ident value =
           let env, result = eval_exp env value in

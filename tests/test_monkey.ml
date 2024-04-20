@@ -10,12 +10,10 @@ let () =
   let suite : test_case list =
     [ { input = "let x = 1;"; expected = Program [ LetStatement ("x", Integer 1) ] }
     ; { input = "let x = 1 + 1;"
-      ; expected =
-          Program [ LetStatement ("x", ExpressionList [ Add (Integer 1, Integer 1) ]) ]
+      ; expected = Program [ LetStatement ("x", Add (Integer 1, Integer 1)) ]
       }
     ; { input = "let x = 1 * 1;"
-      ; expected =
-          Program [ LetStatement ("x", ExpressionList [ Mul (Integer 1, Integer 1) ]) ]
+      ; expected = Program [ LetStatement ("x", Mul (Integer 1, Integer 1)) ]
       }
     ; { input = "let x = -1;"
       ; expected = Program [ LetStatement ("x", Negation (Integer 1)) ]
@@ -25,64 +23,36 @@ let () =
       }
     ; { input = "let x = (2 + 2) * 2;"
       ; expected =
-          Program
-            [ LetStatement
-                ( "x"
-                , ExpressionList
-                    [ Mul (ExpressionList [ Add (Integer 2, Integer 2) ], Integer 2) ] )
-            ]
+          Program [ LetStatement ("x", Mul (Add (Integer 2, Integer 2), Integer 2)) ]
       }
     ; { input = "let x = 2 + 2 * 2;"
       ; expected =
-          Program
-            [ LetStatement
-                ( "x"
-                , ExpressionList
-                    [ Add (Integer 2, ExpressionList [ Mul (Integer 2, Integer 2) ]) ] )
-            ]
+          Program [ LetStatement ("x", Add (Integer 2, Mul (Integer 2, Integer 2))) ]
       }
     ; { input = "let x = 2 != 3;"
-      ; expected =
-          Program [ LetStatement ("x", ExpressionList [ Neq (Integer 2, Integer 3) ]) ]
+      ; expected = Program [ LetStatement ("x", Neq (Integer 2, Integer 3)) ]
       }
     ; { input = "let x = 2 != 1 + 3 / 2 + 10;"
       ; expected =
           Program
             [ LetStatement
                 ( "x"
-                , ExpressionList
-                    [ Neq
-                        ( Integer 2
-                        , ExpressionList
-                            [ Add
-                                (Integer 1, ExpressionList [ Div (Integer 3, Integer 2) ])
-                            ; Add (Integer 1, Integer 10)
-                            ] )
-                    ] )
+                , Neq
+                    ( Integer 2
+                    , Add (Add (Integer 1, Div (Integer 3, Integer 2)), Integer 10) ) )
             ]
       }
     ; { input = "let x = 2 > 1;"
-      ; expected =
-          Program [ LetStatement ("x", ExpressionList [ Gt (Integer 2, Integer 1) ]) ]
+      ; expected = Program [ LetStatement ("x", Gt (Integer 2, Integer 1)) ]
       }
     ; { input = "let x = 2 > (1 + 2) * 5 == true;"
       ; expected =
           Program
             [ LetStatement
                 ( "x"
-                , ExpressionList
-                    [ Eq
-                        ( ExpressionList
-                            [ Gt
-                                ( Integer 2
-                                , ExpressionList
-                                    [ Mul
-                                        ( ExpressionList [ Add (Integer 1, Integer 2) ]
-                                        , Integer 5 )
-                                    ] )
-                            ]
-                        , Bool true )
-                    ] )
+                , Eq
+                    ( Gt (Integer 2, Mul (Add (Integer 1, Integer 2), Integer 5))
+                    , Bool true ) )
             ]
       }
     ; { input = "fn add(a, b){ return a + b; };"
@@ -92,10 +62,7 @@ let () =
                 (Function
                    ( "add"
                    , [ "a"; "b" ]
-                   , Block
-                       [ ReturnStatement
-                           (ExpressionList [ Add (Identifier "a", Identifier "b") ])
-                       ] ))
+                   , Block [ ReturnStatement (Add (Identifier "a", Identifier "b")) ] ))
             ]
       }
     ; { input = "if ( 2 > x ) { return b == c; };"
@@ -103,11 +70,8 @@ let () =
           Program
             [ ExpressionStatement
                 (If
-                   ( ExpressionList [ Gt (Integer 2, Identifier "x") ]
-                   , Block
-                       [ ReturnStatement
-                           (ExpressionList [ Eq (Identifier "b", Identifier "c") ])
-                       ] ))
+                   ( Gt (Integer 2, Identifier "x")
+                   , Block [ ReturnStatement (Eq (Identifier "b", Identifier "c")) ] ))
             ]
       }
     ; { input = "let x = add(2, 4);"
@@ -159,22 +123,21 @@ let () =
     suite
 ;;
 
-(**)
-(* let () = *)
-(*   eval *)
-(*     "let x = 2;\n\ *)
-(*      puts(x + x * x);\n\ *)
-(*      puts(\"~~\");\n\ *)
-(*      let y = { \"a\": 2, 2: 1 };\n\ *)
-(*      puts(\"Hash:\");\n\ *)
-(*      puts(y);\n\ *)
-(*      puts(y[2]);\n\ *)
-(*      y;\n\ *)
-(*      puts(true == false);\n\ *)
-(*      puts(true != false);\n\ *)
-(*      if (x != 2) { return 1; } else { return \"bla\"; };\n" *)
-(*   |> function *)
-(*   | Error err -> Format.printf "Error: %s!" err *)
-(*   | Ok program -> *)
-(*     program |> Evaluator.eval |> fun obj -> Format.printf "$ %a" Evaluator.Object.pp obj *)
-(* ;; *)
+let () =
+  eval
+    "let x = 2;\n\
+     puts(x + x * x);\n\
+     puts(\"~~\");\n\
+     let y = { \"a\": 2, 2: 1 };\n\
+     puts(\"Hash:\");\n\
+     puts(y);\n\
+     puts(y[2]);\n\
+     y;\n\
+     puts(true == false);\n\
+     puts(true != false);\n\
+     if (x != 2) { return 1; } else { return \"bla\"; };\n"
+  |> function
+  | Error err -> Format.printf "Error: %s!" err
+  | Ok program ->
+    program |> Evaluator.eval |> fun obj -> Format.printf "$ %a" Evaluator.Object.pp obj
+;;
