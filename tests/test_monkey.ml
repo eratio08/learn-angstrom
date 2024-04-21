@@ -1,13 +1,15 @@
 open Monkey
 open Ast
 
-type test_case =
+type 'a test_case =
   { input : string
-  ; expected : programm
+  ; expected : 'a
   }
 
+type parser_test_case = programm test_case
+
 let () =
-  let suite : test_case list =
+  let suite : parser_test_case list =
     [ { input = "let x = 1;"; expected = Program [ LetStatement ("x", Integer 1) ] }
     ; { input = "let x = 1 + 1;"
       ; expected = Program [ LetStatement ("x", Add (Integer 1, Integer 1)) ]
@@ -101,43 +103,70 @@ let () =
       }
     ]
   in
-  List.iter
-    (fun case ->
-      eval case.input
-      |> Result.get_ok
-      |> fun res ->
-      if equal case.expected res
-      then ignore ()
-      else (
-        let msg =
-          Format.asprintf
-            "#%s\nexpected: %a\ngot:      %a\n"
-            case.input
-            Ast.pp
-            case.expected
-            Ast.pp
-            res
-        in
-        Format.eprintf "%s" msg;
-        failwith "Test failed"))
-    suite
+  suite
+  |> List.iter (fun case ->
+    eval case.input
+    |> Result.get_ok
+    |> fun res ->
+    if equal case.expected res
+    then ignore ()
+    else (
+      let msg =
+        Format.asprintf
+          "#%s\nexpected: %a\ngot:      %a\n"
+          case.input
+          Ast.pp
+          case.expected
+          Ast.pp
+          res
+      in
+      Format.eprintf "%s" msg;
+      failwith "Test failed"))
 ;;
 
+type interpreter_test_case = Evaluator.obj test_case
+
 let () =
-  eval
-    "let x = 2;\n\
-     puts(x + x * x);\n\
-     puts(\"~~\");\n\
-     let y = { \"a\": 2, 2: 1 };\n\
-     puts(\"Hash:\");\n\
-     puts(y);\n\
-     puts(y[2]);\n\
-     y;\n\
-     puts(true == false);\n\
-     puts(true != false);\n\
-     if (x != 2) { return 1; } else { return \"bla\"; };\n"
-  |> function
-  | Error err -> Format.printf "Error: %s!" err
-  | Ok program ->
-    program |> Evaluator.eval |> fun obj -> Format.printf "$ %a" Evaluator.Object.pp obj
+  let suite : interpreter_test_case list =
+    [ { input = "let x = 2;"; expected = Evaluator.Null }
+    ; { input = "let x = 2; x;"; expected = Evaluator.Integer 2 }
+    ; { input = "let x = { \"a\": 2, 2: 1 }; x;"
+      ; expected = Evaluator.Hash [ Integer 2, Integer 1; String "a", Integer 2 ]
+      }
+    ; { input = "let x = { \"a\": 2, 2: 1 }; x[2];"; expected = Evaluator.Integer 1 }
+    ; { input = "true;"; expected = Evaluator.True }
+    ; { input = "false;"; expected = Evaluator.False }
+    ; { input = "\"str\";"; expected = Evaluator.String "str" }
+    ; { input = "[1,2,3];"
+      ; expected = Evaluator.Array [ Integer 3; Integer 2; Integer 1 ]
+      }
+    ; { input =
+          "fn some_fn (x) { if (x) { retune 1; } else { return 2; };}; some_fn(true);"
+      ; expected = Evaluator.Integer 1
+      }
+      (* builtins *)
+    ; { input = "puts(2);"; expected = Evaluator.Null }
+    ]
+  in
+  suite
+  |> List.iter (fun case ->
+    case.input
+    |> eval
+    |> Result.map Evaluator.eval
+    |> Result.get_ok
+    |> fun res ->
+    if Evaluator.Object.equal case.expected res
+    then ignore ()
+    else (
+      let msg =
+        Format.asprintf
+          "#%s\nexpected: %a\ngot:      %a\n"
+          case.input
+          Evaluator.Object.pp
+          case.expected
+          Evaluator.Object.pp
+          res
+      in
+      Format.eprintf "%s" msg;
+      failwith "Test failed"))
 ;;

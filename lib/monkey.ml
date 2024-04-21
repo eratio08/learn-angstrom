@@ -466,26 +466,26 @@ module Evaluator = struct
   end
 
   module Object = struct
-    let rec pp_list fmt_a fmt = function
+    let rec pp_list ?(sep = "; ") fmt_a fmt = function
       | [] -> Format.fprintf fmt ""
       | a :: [] -> Format.fprintf fmt "%a" fmt_a a
-      | a :: rest -> Format.fprintf fmt "%a, %a" fmt_a a (pp_list fmt_a) rest
+      | a :: rest -> Format.fprintf fmt "%a%s %a" fmt_a a sep (pp_list fmt_a) rest
     ;;
 
     let rec pp fmt = function
       | Null -> Format.fprintf fmt "Null"
-      | Return t -> Format.fprintf fmt "%a" pp t
+      | Return t -> Format.fprintf fmt "Return %a" pp t
       | Error msg -> Format.fprintf fmt "Error: %s" msg
-      | Integer i -> Format.fprintf fmt "%d" i
-      | Array l -> Format.fprintf fmt "[%a]" (pp_list pp) l
-      | Hash h -> Format.fprintf fmt "{%a}" (pp_list pp_pair) h
+      | Integer i -> Format.fprintf fmt "Integer %d" i
+      | Array l -> Format.fprintf fmt "Array [%a]" (pp_list pp) l
+      | Hash h -> Format.fprintf fmt "Hash [%a]" (pp_list pp_pair) h
       | Fn _ -> Format.fprintf fmt "builtin function"
-      | String s -> Format.fprintf fmt "%s" s
-      | True -> Format.fprintf fmt "true"
-      | False -> Format.fprintf fmt "false"
-      | Function (name, _, _, _) -> Format.fprintf fmt "fn %s(..){..}" name
+      | String s -> Format.fprintf fmt "String \"%s\"" s
+      | True -> Format.fprintf fmt "True"
+      | False -> Format.fprintf fmt "False"
+      | Function (name, _, _, _) -> Format.fprintf fmt "Function (%s, (..),{..})" name
 
-    and pp_pair fmt (key, value) = Format.fprintf fmt "%a: %a" pp key pp value
+    and pp_pair fmt (key, value) = Format.fprintf fmt "(%a, %a)" pp key pp value
 
     let rec equal t1 t2 =
       match t1, t2 with
