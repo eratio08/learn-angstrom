@@ -31,7 +31,7 @@
    if-expression ::=| "if" '(' expression ')' block-statement
                     | "if" '(' expression ')' block-statement "else" block-statement
    block-statement ::= '{' many statement '}'
-   function-literal ::= "fn" identifier '(' function-parameter ')' block-statement
+   function-literal ::= "fn" '(' function-parameter ')' block-statement
    function-parameter ::= | empty
                           | identifier
                           | identifier ',' function-parameter

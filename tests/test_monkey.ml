@@ -180,6 +180,11 @@ let () =
            some_fn(false);"
       ; expected = Evaluator.Integer 2
       }
+    ; { input =
+          "let some_fn = fn (f) { if (f()) { return 1; } else { return 2; };}; \
+           some_fn(fn () { return true;});"
+      ; expected = Evaluator.Integer 1
+      }
       (* builtins *)
     ; { input = "puts(2);"; expected = Evaluator.Null }
     ]
