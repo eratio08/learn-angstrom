@@ -57,13 +57,12 @@ let () =
                     , Bool true ) )
             ]
       }
-    ; { input = "fn add(a, b){ return a + b; };"
+    ; { input = "fn(a, b){ return a + b; };"
       ; expected =
           Program
             [ ExpressionStatement
                 (Function
-                   ( "add"
-                   , [ "a"; "b" ]
+                   ( [ "a"; "b" ]
                    , Block [ ReturnStatement (Add (Identifier "a", Identifier "b")) ] ))
             ]
       }
@@ -76,17 +75,26 @@ let () =
                    , Block [ ReturnStatement (Eq (Identifier "b", Identifier "c")) ] ))
             ]
       }
+    ; { input = "if ( 2 > x ) { return b == c; } else { return x; };"
+      ; expected =
+          Program
+            [ ExpressionStatement
+                (IfElse
+                   ( Gt (Integer 2, Identifier "x")
+                   , Block [ ReturnStatement (Eq (Identifier "b", Identifier "c")) ]
+                   , Block [ ReturnStatement (Identifier "x") ] ))
+            ]
+      }
     ; { input = "let x = add(2, 4);"
       ; expected =
           Program
             [ LetStatement ("x", Call (Identifier "add", [ Integer 2; Integer 4 ])) ]
       }
-    ; { input = "let x = fn add(c, d) { return true; };"
+    ; { input = "let x = fn(c, d) { return true; };"
       ; expected =
           Program
             [ LetStatement
-                ( "x"
-                , Function ("add", [ "c"; "d" ], Block [ ReturnStatement (Bool true) ]) )
+                ("x", Function ([ "c"; "d" ], Block [ ReturnStatement (Bool true) ]))
             ]
       }
     ; { input = "let x = { a: 2, 5: \"a\" };"
@@ -100,6 +108,28 @@ let () =
       }
     ; { input = "index[2];"
       ; expected = Program [ ExpressionStatement (Index (Identifier "index", Integer 2)) ]
+      }
+    ; { input = "fn(x) { return x; };}"
+      ; expected =
+          Program
+            [ ExpressionStatement
+                (Function ([ "x" ], Block [ ReturnStatement (Identifier "x") ]))
+            ]
+      }
+    ; { input = "fn (x) { if (x) { return 1; } else { return 2; };};"
+      ; expected =
+          Program
+            [ ExpressionStatement
+                (Function
+                   ( [ "x" ]
+                   , Block
+                       [ ExpressionStatement
+                           (IfElse
+                              ( Identifier "x"
+                              , Block [ ReturnStatement (Integer 1) ]
+                              , Block [ ReturnStatement (Integer 2) ] ))
+                       ] ))
+            ]
       }
     ]
   in
@@ -141,8 +171,14 @@ let () =
       ; expected = Evaluator.Array [ Integer 3; Integer 2; Integer 1 ]
       }
     ; { input =
-          "fn some_fn (x) { if (x) { retune 1; } else { return 2; };}; some_fn(true);"
+          "let some_fn = fn (x) { if (x) { return 1; } else { return 2; };}; \
+           some_fn(true);"
       ; expected = Evaluator.Integer 1
+      }
+    ; { input =
+          "let some_fn = fn (x) { if (x) { return 1; } else { return 2; };}; \
+           some_fn(false);"
+      ; expected = Evaluator.Integer 2
       }
       (* builtins *)
     ; { input = "puts(2);"; expected = Evaluator.Null }

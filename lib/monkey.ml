@@ -56,7 +56,7 @@ module Ast = struct
     | Bool of bool
     | Array of expression list
     | Hash of (expression * expression) list
-    | Function of string * string list * block_statement
+    | Function of string list * block_statement
     | If of expression * block_statement
     | IfElse of expression * block_statement * block_statement
     | Identifier of string
@@ -116,11 +116,10 @@ module Ast = struct
             "Hash [%a]"
             (pp_list (fun fmt (k, v) -> Format.fprintf fmt "(%a, %a)" pp_exp k pp_exp v))
             h
-        | Function (str, ps, block) ->
+        | Function (ps, block) ->
           Format.fprintf
             fmt
-            "Function (\"%s\", [%a], %a)"
-            str
+            "Function ([%a], %a)"
             (pp_list (fun fmt t -> Format.fprintf fmt "\"%s\"" t))
             ps
             pp_block
@@ -172,8 +171,8 @@ module Ast = struct
         | Array a1, Array a2 -> List.equal equal_exp a1 a2
         | Hash h1, Hash h2 ->
           List.equal (fun (k1, v1) (k2, v2) -> equal_exp k1 k2 && equal_exp v1 v2) h1 h2
-        | Function (n1, p1, b1), Function (n2, p2, b2) ->
-          String.equal n1 n2 && List.equal String.equal p1 p2 && equal_block b1 b2
+        | Function (p1, b1), Function (p2, b2) ->
+          List.equal String.equal p1 p2 && equal_block b1 b2
         | If (e1, b1), If (e2, b2) -> equal_exp e1 e2 && equal_block b1 b2
         | IfElse (e1, b1, eb1), IfElse (e2, b2, eb2) ->
           equal_exp e1 e2 && equal_block b1 b2 && equal_block eb1 eb2
@@ -301,13 +300,10 @@ module Ast = struct
         in
         (* "fn"'('<fn-params>')'<block> Parser *)
         let fn_literal =
-          symbol "fn" *> identifier
-          >>= fun ident ->
-          char_sym '('
+          symbol "fn" *> char_sym '('
           >>= (fun _ -> fn_params)
           <* char_sym ')'
-          >>= fun params ->
-          block_stmt >>= fun stmts -> return (Function (ident, params, stmts))
+          >>= fun params -> block_stmt >>= fun stmts -> return (Function (params, stmts))
         in
         (* <exp>|<exp>,<exp_list> Parser *)
         let exp_list =
@@ -441,7 +437,7 @@ module Evaluator = struct
     | Array of obj list
     | Hash of (obj * obj) list
     | Fn of (obj list -> obj)
-    | Function of string * string list * Ast.block_statement * env
+    | Function of string list * Ast.block_statement * env
     | String of string
     | True
     | False
@@ -483,7 +479,7 @@ module Evaluator = struct
       | String s -> Format.fprintf fmt "String \"%s\"" s
       | True -> Format.fprintf fmt "True"
       | False -> Format.fprintf fmt "False"
-      | Function (name, _, _, _) -> Format.fprintf fmt "Function (%s, (..),{..})" name
+      | Function (_, _, _) -> Format.fprintf fmt "Function ((..),{..})"
 
     and pp_pair fmt (key, value) = Format.fprintf fmt "(%a, %a)" pp key pp value
 
@@ -498,7 +494,7 @@ module Evaluator = struct
         List.equal (fun (k1, v1) (k2, v2) -> equal k1 k2 && equal v1 v2) h1 h2
       | String s1, String s2 -> String.equal s1 s2
       | True, True | False, False -> true
-      | Function (n1, _, _, _), Function (n2, _, _, _) -> String.equal n1 n2
+      | Function (a1, _, _), Function (a2, _, _) -> List.equal String.equal a1 a2
       | Fn _, Fn _ -> false
       | _, _ -> false
     ;;
@@ -596,9 +592,7 @@ module Evaluator = struct
                | Some fn -> env, fn
                | None -> env, Error ("unknown identifier: " ^ identifier))
           in
-          let eval_fn env ident params stmts =
-            env, Function (ident, params, stmts, env)
-          in
+          let eval_fn env params stmts = env, Function (params, stmts, env) in
           let eval_array env elems =
             let env, elems = eval_expressions env elems in
             match elems with
@@ -745,7 +739,7 @@ module Evaluator = struct
               let env, args = eval_expressions env args in
               (match ident, args with
                | _, (Error _ as err) :: [] -> env, err
-               | Function (_, parameter, blocks, fn_env), args ->
+               | Function (parameter, blocks, fn_env), args ->
                  let new_env = Environment.new_enclosing fn_env in
                  let new_env = extend_function_env new_env args parameter in
                  let env, evaluated = eval_block new_env blocks in
@@ -789,14 +783,6 @@ module Evaluator = struct
             | Result.Error err -> env, err
             | Result.Ok l -> env, Hash l
           in
-          let rec eval_exp_list ?(res = Null) env = function
-            | [] -> env, res
-            | e :: es ->
-              let env, e = eval_exp env e in
-              (match e with
-               | Error _ -> env, e
-               | _ -> eval_exp_list env es)
-          in
           match ast with
           | Ast.Bang exp -> eval_bang env exp
           | Ast.Negation exp -> eval_negation env exp
@@ -811,7 +797,7 @@ module Evaluator = struct
           | Ast.Call (ident, args) -> eval_call env ident args
           | Ast.Index (ident, index) -> eval_index env ident index
           | Ast.Identifier identifier -> eval_identifier env identifier
-          | Ast.Function (ident, params, stmts) -> eval_fn env ident params stmts
+          | Ast.Function (params, stmts) -> eval_fn env params stmts
           | Ast.Array elems -> eval_array env elems
           | Ast.If (condition, if_block) -> eval_if env condition if_block
           | Ast.IfElse (condition, if_block, else_block) ->
