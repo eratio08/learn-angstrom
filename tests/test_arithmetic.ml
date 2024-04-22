@@ -30,3 +30,5 @@ let eval (str : string) : int =
   | Ok v -> v
   | Error msg -> failwith msg
 ;;
+
+(* let () = assert (Int.equal 3 (eval "1 + 2")) *)

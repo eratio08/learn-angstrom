@@ -1,5 +1,5 @@
 (tests
- (names test_monkey)
+ (names test_monkey test_arithmetic)
  (libraries monkey))
 
 (env

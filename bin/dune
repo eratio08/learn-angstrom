@@ -1,7 +1,7 @@
 (executables
  (public_names learn_angstrom)
- (names learn_angstrom)
- (libraries angstrom))
+ (names repl)
+ (libraries angstrom monkey))
 
 (env
  (dev

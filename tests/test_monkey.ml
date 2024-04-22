@@ -195,7 +195,7 @@ let () =
     |> eval
     |> Result.map Evaluator.eval
     |> Result.get_ok
-    |> fun res ->
+    |> fun (_, res) ->
     if Evaluator.Object.equal case.expected res
     then ignore ()
     else (

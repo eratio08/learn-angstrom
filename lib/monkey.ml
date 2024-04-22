@@ -420,6 +420,9 @@ module Ast = struct
   ;;
 
   let stmts = many (stmt ()) >>= fun ls -> return (Program ls)
+  (* Eval *)
+
+  let eval str = parse_string ~consume:Prefix stmts str
 end
 
 module Evaluator = struct
@@ -561,8 +564,8 @@ module Evaluator = struct
     | _ -> None
   ;;
 
-  let eval (Ast.Program stmts) =
-    let rec eval_programm ?(res = Null) env : Ast.statement list -> obj =
+  let eval ?(env = Environment.empty) (Ast.Program stmts) : env * obj =
+    let rec eval_programm ?(res = Null) env : Ast.statement list -> env * obj =
       let rec eval_stmt env : Ast.statement -> env * obj =
         let eval_block env (Ast.Block stmts) =
           let rec eval_statments ?(res = Null) env = function
@@ -825,18 +828,14 @@ module Evaluator = struct
         | Ast.ExpressionStatement stmt -> eval_exp env stmt
       in
       function
-      | [] -> res
+      | [] -> env, res
       | stmt :: stmts ->
         let env, result = eval_stmt env stmt in
         (match result with
-         | Return value -> value
-         | Error _ -> result
+         | Return value -> env, value
+         | Error _ -> env, result
          | _ -> eval_programm ~res:result env stmts)
     in
-    eval_programm Environment.empty stmts
+    eval_programm env stmts
   ;;
 end
-
-(* Eval *)
-
-let eval str = parse_string ~consume:Prefix Ast.stmts str
