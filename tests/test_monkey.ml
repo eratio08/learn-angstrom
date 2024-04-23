@@ -131,6 +131,37 @@ let () =
                        ] ))
             ]
       }
+    ; { input =
+          "let rec = fn (x) { if (x) { puts(2); return rec(false); } else { return \
+           \"done\"; };}; rec(true);"
+      ; expected =
+          Program
+            [ LetStatement
+                ( "rec"
+                , Function
+                    ( [ "x" ]
+                    , Block
+                        [ ExpressionStatement
+                            (IfElse
+                               ( Identifier "x"
+                               , Block
+                                   [ ExpressionStatement
+                                       (Call (Identifier "puts", [ Integer 2 ]))
+                                   ; ReturnStatement
+                                       (Call (Identifier "rec", [ Bool false ]))
+                                   ]
+                               , Block [ ReturnStatement (String "done") ] ))
+                        ] ) )
+            ; ExpressionStatement (Call (Identifier "rec", [ Bool true ]))
+            ]
+      }
+    ; { input = "fn(){ 1;};"
+      ; expected =
+          Program
+            [ ExpressionStatement
+                (Function ([], Block [ ExpressionStatement (Integer 1) ]))
+            ]
+      }
     ]
   in
   suite
@@ -184,6 +215,19 @@ let () =
           "let some_fn = fn (f) { if (f()) { return 1; } else { return 2; };}; \
            some_fn(fn () { return true;});"
       ; expected = Evaluator.Integer 1
+      }
+    ; { input =
+          "let rec = fn (x) {\n\
+          \  if (x < 2) {\n\
+          \    let x = x + 2;\n\
+          \    puts(x);\n\
+          \    return rec(x);\n\
+          \  } else {\n\
+          \    return x;\n\
+          \  };\n\
+           };\n\
+           rec(1);"
+      ; expected = Evaluator.Integer 3
       }
       (* builtins *)
     ; { input = "puts(2);"; expected = Evaluator.Null }

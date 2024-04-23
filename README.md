@@ -6,4 +6,5 @@ Learning about [Angstrom](https://v3.ocaml.org/p/angstrom/0.15.0/doc/Angstrom/in
 
 - [x] Parsing Monkey
 - [x] Interpret Monkey
-- [ ] REPL
+- [x] REPL
+- [ ] Recursion

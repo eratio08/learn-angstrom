@@ -439,7 +439,7 @@ module Evaluator = struct
     | Integer of int
     | Array of obj list
     | Hash of (obj * obj) list
-    | Fn of (obj list -> obj)
+    | Fn of string * (obj list -> obj)
     | Function of string list * Ast.block_statement * env
     | String of string
     | True
@@ -471,18 +471,25 @@ module Evaluator = struct
       | a :: rest -> Format.fprintf fmt "%a%s %a" fmt_a a sep (pp_list fmt_a) rest
     ;;
 
-    let rec pp fmt = function
+    let rec pp fmt
+      = (* let pp_block fmt (Block stmts) = Format.fprintf fmt "Block (%a)" pp *)
+      function
       | Null -> Format.fprintf fmt "Null"
       | Return t -> Format.fprintf fmt "Return %a" pp t
       | Error msg -> Format.fprintf fmt "Error: %s" msg
       | Integer i -> Format.fprintf fmt "Integer %d" i
       | Array l -> Format.fprintf fmt "Array [%a]" (pp_list pp) l
       | Hash h -> Format.fprintf fmt "Hash [%a]" (pp_list pp_pair) h
-      | Fn _ -> Format.fprintf fmt "builtin function"
+      | Fn (n, _) -> Format.fprintf fmt "%s(...)" n
       | String s -> Format.fprintf fmt "String \"%s\"" s
       | True -> Format.fprintf fmt "True"
       | False -> Format.fprintf fmt "False"
-      | Function (_, _, _) -> Format.fprintf fmt "Function ((..),{..})"
+      | Function (args, _, _) ->
+        Format.fprintf
+          fmt
+          "Function (%a, [<BlockStatements>], env)"
+          (pp_list (fun fmt t -> Format.fprintf fmt "%s" t))
+          args
 
     and pp_pair fmt (key, value) = Format.fprintf fmt "(%a, %a)" pp key pp value
 
@@ -498,7 +505,7 @@ module Evaluator = struct
       | String s1, String s2 -> String.equal s1 s2
       | True, True | False, False -> true
       | Function (a1, _, _), Function (a2, _, _) -> List.equal String.equal a1 a2
-      | Fn _, Fn _ -> false
+      | Fn (n1, _), Fn (n2, _) -> String.equal n1 n2
       | _, _ -> false
     ;;
   end
@@ -507,60 +514,66 @@ module Evaluator = struct
     | "len" ->
       Some
         (Fn
-           (function
+           ( "len"
+           , function
              | x :: [] ->
                (match x with
                 | String s -> Integer (String.length s)
                 | Array a -> Integer (List.length a)
                 | _ -> Error "len not supported")
-             | _ -> Error "wrong number of arguments, expecte 1"))
+             | _ -> Error "wrong number of arguments, expecte 1" ))
     | "first" ->
       Some
         (Fn
-           (function
+           ( "first"
+           , function
              | x :: [] ->
                (match x with
                 | Array a -> if List.length a > 0 then List.hd a else Null
                 | _ -> Error "argument to first must be an array")
-             | _ -> Error "wrong number of arguments, expect 1"))
+             | _ -> Error "wrong number of arguments, expect 1" ))
     | "last" ->
       Some
         (Fn
-           (function
+           ( "last"
+           , function
              | x :: [] ->
                (match x with
                 | Array a ->
                   if List.length a > 0 then List.nth a (List.length a - 1) else Null
                 | _ -> Error "argument to last must be an array")
-             | _ -> Error "wrong number of arguments, expected 1"))
+             | _ -> Error "wrong number of arguments, expected 1" ))
     | "rest" ->
       Some
         (Fn
-           (function
+           ( "rest"
+           , function
              | x :: [] ->
                (match x with
                 | Array a -> if List.length a > 0 then Array (List.tl a) else Null
                 | _ -> Error "argument to rest must be an array")
-             | _ -> Error "wrong number of arguments, expected 1"))
+             | _ -> Error "wrong number of arguments, expected 1" ))
     | "push" ->
       Some
         (Fn
-           (function
+           ( "push"
+           , function
              | [ x; y ] ->
                (match x, y with
                 | Array a, t -> if List.length a > 0 then Array (t :: a) else Null
                 | _ -> Error "argument to push must be an array and any object")
-             | _ -> Error "wrong number of arguments, expected 2"))
+             | _ -> Error "wrong number of arguments, expected 2" ))
     | "puts" ->
       Some
         (Fn
-           (fun args ->
-             List.fold_left
-               (fun acc a ->
-                 Format.printf "%a\n" Object.pp a;
-                 acc)
-               Null
-               args))
+           ( "puts"
+           , fun args ->
+               List.fold_left
+                 (fun acc a ->
+                   Format.printf "%a\n" Object.pp a;
+                   acc)
+                 Null
+                 args ))
     | _ -> None
   ;;
 
@@ -595,7 +608,10 @@ module Evaluator = struct
                | Some fn -> env, fn
                | None -> env, Error ("unknown identifier: " ^ identifier))
           in
-          let eval_fn env params stmts = env, Function (params, stmts, env) in
+          let eval_fn env params stmts =
+            let fn_obj = Function (params, stmts, env) in
+            env, fn_obj
+          in
           let eval_array env elems =
             let env, elems = eval_expressions env elems in
             match elems with
@@ -749,7 +765,7 @@ module Evaluator = struct
                  (match evaluated with
                   | Return obj -> env, obj
                   | _ -> env, evaluated)
-               | Fn fn, args -> env, fn args
+               | Fn (_, fn), args -> env, fn args
                | _ -> env, Error "unknown function")
           in
           let eval_index env ident index =
