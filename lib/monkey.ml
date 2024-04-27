@@ -449,6 +449,13 @@ module Evaluator = struct
     let empty = Environment (Store.empty, Nil)
     let new_enclosing outenv : env = Environment (Store.empty, outenv)
 
+    let rec add_outer outer = function
+      | Nil -> outer
+      | Environment (store, Nil) -> Environment (store, outer)
+      | Environment (store, current_outer) ->
+        Environment (store, add_outer outer current_outer)
+    ;;
+
     let set key value = function
       | Environment (store, outer) -> Environment (Store.add key value store, outer)
       | Nil -> Nil
@@ -461,6 +468,25 @@ module Evaluator = struct
         (match Store.find key store with
          | exception Not_found -> get key outer
          | value -> Some value)
+    ;;
+
+    let rec pp pp_v fmt =
+      let rec pp_list ?(sep = "; ") fmt_a fmt = function
+        | [] -> Format.fprintf fmt ""
+        | x :: [] -> Format.fprintf fmt "%a" fmt_a x
+        | x :: xs -> Format.fprintf fmt "%a%s%a" fmt_a x sep (pp_list ~sep fmt_a) xs
+      in
+      let pp_kv pp_v fmt (k, v) = Format.fprintf fmt "(\"%s\", %a)" k pp_v v in
+      function
+      | Nil -> Format.fprintf fmt "Nil"
+      | Environment (store, outer) ->
+        Format.fprintf
+          fmt
+          "Environment (Map (%a), %a)"
+          (pp_list (pp_kv pp_v))
+          (Store.to_list store)
+          (pp pp_v)
+          outer
     ;;
   end
 
@@ -608,10 +634,7 @@ module Evaluator = struct
                | Some fn -> env, fn
                | None -> env, Error ("unknown identifier: " ^ identifier))
           in
-          let eval_fn env params stmts =
-            let fn_obj = Function (params, stmts, env) in
-            env, fn_obj
-          in
+          let eval_fn env params stmts = env, Function (params, stmts, env) in
           let eval_array env elems =
             let env, elems = eval_expressions env elems in
             match elems with
@@ -760,8 +783,11 @@ module Evaluator = struct
                | _, (Error _ as err) :: [] -> env, err
                | Function (parameter, blocks, fn_env), args ->
                  let new_env = Environment.new_enclosing fn_env in
+                 (* Allow recursion, might have unwanted side effects *)
+                 let new_env = Environment.add_outer env new_env in
                  let new_env = extend_function_env new_env args parameter in
-                 let env, evaluated = eval_block new_env blocks in
+                 (* throw away the function env *)
+                 let _, evaluated = eval_block new_env blocks in
                  (match evaluated with
                   | Return obj -> env, obj
                   | _ -> env, evaluated)
